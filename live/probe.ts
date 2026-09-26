@@ -307,6 +307,7 @@ export function isTransient(status: number): boolean {
   return status >= 500 || status === 429;
 }
 
+async function main(): Promise<void> {
 const { key, base } = loadEnv();
 mkdirSync(new URL("../research/raw/", import.meta.url), { recursive: true });
 
@@ -403,3 +404,8 @@ console.log(`\nledger: ${JSON.stringify(ledger)}`);
 // path; the probe is a one-shot script, so exit explicitly instead of letting an
 // unrelated transport error surface as a crash after a successful probe.
 process.exit(0);
+}
+
+// Importable without side effects: the offline suite asserts `buildHeaders` really
+// omits the Authorization header, which is the bug that once produced a false fixture.
+if (import.meta.main) await main();
