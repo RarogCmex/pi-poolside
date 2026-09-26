@@ -146,6 +146,22 @@ export function parseGatewayError(errorMessage: string): ParsedGatewayError {
     }
   }
 
+  // The bare SDK form of the string dialect: the OpenAI SDK wraps a JSON string
+  // body, so `{"error":"…"}` reaches pi as `403 "please check the api-key you
+  // provided"` — a JSON *string*, quotation marks included. Body recovery
+  // removes the quotes, but the parser accepts both shapes so the clarification
+  // never silently depends on the wrapper being installed.
+  if (rest.startsWith('"') && rest.endsWith('"') && rest.length > 1) {
+    try {
+      const parsed = JSON.parse(rest);
+      if (typeof parsed === "string" && parsed.trim()) {
+        return { status, message: parsed.trim(), raw };
+      }
+    } catch {
+      // Not a JSON string after all.
+    }
+  }
+
   return { status, message: rest, raw };
 }
 

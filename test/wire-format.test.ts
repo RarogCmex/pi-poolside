@@ -29,7 +29,20 @@ import { DEFAULT_BASE_URL, entryToModel, MAX_TOKENS_FIELD } from "../models.ts";
 
 const api = withBodyRecoveryApi(openAICompletionsApi());
 
-const LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+/**
+ * pi's vocabulary has two types: `ThinkingLevel` (the six levels a *caller* can
+ * request) and `ModelThinkingLevel` (those six plus `"off"`). "Off" is therefore
+ * expressed to the adapter as **`reasoning: undefined`** — there is no `"off"`
+ * string on this side of the seam (pi-ai `types.d.ts:24-25`, and `streamSimple`
+ * maps a clamped `"off"` to `undefined` at `api/openai-completions.js:523-524`).
+ * `LEVELS` models exactly that, so the wire matrix covers every request pi can
+ * actually produce.
+ */
+const OFF = undefined;
+const LEVELS: (ThinkingLevel | undefined)[] = [OFF, "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** The thinking state a level must produce on the wire. */
+const wantsThinking = (level: ThinkingLevel | undefined): boolean => level !== OFF;
 
 const weatherTool: Tool = {
   name: "get_weather",
@@ -59,6 +72,7 @@ function secondTurnContext(reasoningSignature = "reasoning_content"): Transcript
         provider: "poolside",
         api: "openai-completions",
         model: "poolside/laguna-xs-2.1",
+        stopReason: "stop",
         content: [
           { type: "thinking", thinking: "Four.", thinkingSignature: reasoningSignature },
           { type: "text", text: "4" },
@@ -93,6 +107,7 @@ function noReasoningContext(): TranscriptContext {
         provider: "poolside",
         api: "openai-completions",
         model: "poolside/laguna-xs-2.1",
+        stopReason: "stop",
         content: [{ type: "text", text: "hello" }],
         timestamp: 2,
       // A real transcript always carries usage on a completed assistant turn;
@@ -230,8 +245,8 @@ describe("thinking is boolean, and it is expressed in chat_template_kwargs", () 
       const body = await capture({ reasoning: level });
       assert.deepEqual(
         body.chat_template_kwargs,
-        { enable_thinking: level !== "off" },
-        `level ${level} must mean ${level !== "off" ? "thinking on" : "thinking off"}`,
+        { enable_thinking: wantsThinking(level) },
+        `level ${String(level)} must mean ${wantsThinking(level) ? "thinking on" : "thinking off"}`,
       );
     }
   });
@@ -239,9 +254,21 @@ describe("thinking is boolean, and it is expressed in chat_template_kwargs", () 
   test("off is never clamped upward into a thinking request", async () => {
     // T1's trap: a null `off` is filtered out of the supported levels and then
     // clamps *up* to the lowest level, silently billing thinking the user asked
-    // to disable. `enable_thinking:false` on the wire is the proof it did not.
-    const body = await capture({ reasoning: "off" });
+    // to disable. `enable_thinking:false` on the wire is the proof it did not —
+    // and note the flag is *present and false*, not merely absent, which is what
+    // makes the switch explicit rather than a default the provider might change.
+    const body = await capture({ reasoning: OFF });
+    assert.equal("chat_template_kwargs" in body, true);
     assert.equal(body.chat_template_kwargs.enable_thinking, false);
+  });
+
+  test("the same false is produced by an explicit `off` level on the model map", async () => {
+    // Whatever route pi takes to "off" (no level requested, or a level clamped
+    // down to off), the wire result must be identical.
+    const target = model();
+    const { clampThinkingLevel } = await import("@earendil-works/pi-ai");
+    assert.equal(clampThinkingLevel(target, "off"), "off");
+    assert.equal((await capture({ reasoning: OFF })).chat_template_kwargs.enable_thinking, false);
   });
 
   test("the levels this model does not have clamp down to a real 'on'", async () => {
@@ -267,7 +294,7 @@ describe("thinking is boolean, and it is expressed in chat_template_kwargs", () 
           assert.equal(
             bytes.includes(`"${internal}"`),
             false,
-            `${entry.id} at ${level} leaked the level name ${internal}`,
+            `${entry.id} at ${String(level)} leaked the level name ${internal}`,
           );
         }
         // The only allowed thinking-related key is the documented switch.

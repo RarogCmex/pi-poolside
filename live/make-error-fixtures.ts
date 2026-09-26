@@ -143,3 +143,41 @@ writeFileSync(
   `${JSON.stringify(fixtures, null, 2)}\n`,
 );
 console.log(`wrote test/fixtures/error-bodies.json with ${Object.keys(fixtures).length - 1} recorded bodies`);
+
+// --- recorded SSE streams ----------------------------------------------------
+
+/**
+ * The two recorded streaming responses, verbatim, so the offline suite can feed
+ * the real adapter the real bytes.
+ *
+ * They exist because of one measured oddity: **every chunk carries a cumulative
+ * `usage`**, and the final chunk sometimes repeats the total and sometimes
+ * carries `usage: null` (`research/raw/stream-usage.txt` vs
+ * `stream-usage-no-option.txt`). pi-ai *assigns* per chunk instead of
+ * accumulating (`api/openai-completions.js:362-363`), which is only correct for
+ * a cumulative stream — `test/usage.test.ts` pins that.
+ */
+const STREAMS: Record<string, { file: string; case: string }> = {
+  "with-include-usage": {
+    file: "stream-usage",
+    case: "stream + stream_options.include_usage; the final chunk has `usage: null`",
+  },
+  "without-include-usage": {
+    file: "stream-usage-no-option",
+    case: "stream without stream_options; usage is present in every chunk anyway and the final chunk repeats the total",
+  },
+};
+
+const streams: Record<string, unknown> = {
+  "$comment":
+    "Recorded verbatim from https://inference.poolside.ai/v1/chat/completions on 2026-09-26 (research/raw/*.txt). Regenerate with `node live/make-error-fixtures.ts`.",
+};
+for (const [name, entry] of Object.entries(STREAMS)) {
+  const raw = parseRaw(entry.file);
+  streams[name] = { case: entry.case, recordedFile: `research/raw/${entry.file}.txt`, sse: raw.body };
+}
+writeFileSync(
+  new URL("../test/fixtures/streams.json", import.meta.url),
+  `${JSON.stringify(streams, null, 2)}\n`,
+);
+console.log(`wrote test/fixtures/streams.json with ${Object.keys(STREAMS).length} recorded streams`);
