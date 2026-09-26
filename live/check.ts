@@ -26,8 +26,9 @@
  *  E. thinking is boolean— off ⇒ `reasoning_tokens: 0`; on ⇒ `reasoning_content`
  *                          present. Two tiny requests.
  *  F. reasoning echo     — the paired experiment: the same second turn with and
- *                          without `reasoning_content` on the assistant message.
- *                          Two tiny requests.
+ *                          without `reasoning_content` on the assistant message,
+ *                          three pairs. The *effect* the vendor documents did not
+ *                          reproduce here; the acceptance of the echoed field did.
  *  G. tools              — a function tool returns a well-formed `tool_calls`.
  *  H. streaming usage    — per-chunk cumulative usage through the real adapter;
  *                          the totals must equal the last cumulative value, not
@@ -147,16 +148,19 @@ async function raw(
   } catch {
     json = undefined;
   }
+  // Three usage dialects are read here because three surfaces are probed:
+  // chat-completions (`prompt_tokens`/`completion_tokens`), Anthropic Messages
+  // (`input_tokens`/`output_tokens`) and Responses (`input_tokens`/`output_tokens`).
   const usage = json?.usage ?? json?.choices?.[0]?.usage;
   ledger.push({
     check,
     request,
     status: response.status,
     billed: response.ok,
-    inputTokens: usage?.prompt_tokens ?? 0,
-    outputTokens: usage?.completion_tokens ?? 0,
-    reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens ?? 0,
-    cachedTokens: usage?.prompt_tokens_details?.cached_tokens ?? 0,
+    inputTokens: usage?.prompt_tokens ?? usage?.input_tokens ?? 0,
+    outputTokens: usage?.completion_tokens ?? usage?.output_tokens ?? 0,
+    reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens ?? usage?.output_tokens_details?.reasoning_tokens ?? 0,
+    cachedTokens: usage?.prompt_tokens_details?.cached_tokens ?? usage?.input_tokens_details?.cached_tokens ?? 0,
   });
   return { status: response.status, text, contentType: response.headers.get("content-type"), json };
 }
@@ -262,7 +266,12 @@ async function streamLive(
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
   void options;
-  const message = json.choices[0].message as AssistantMessage;
+  const choice = json.choices[0];
+  const message = choice.message as AssistantMessage;
+  // The raw response carries `finish_reason` at the choice level; pi maps it to
+  // `stopReason`. Setting it here keeps this harness's message shape comparable
+  // with what pi produces.
+  (message as any).stopReason = choice.finish_reason;
   (message as any).usage = {
     input: (usage?.prompt_tokens ?? 0) - (usage?.prompt_tokens_details?.cached_tokens ?? 0),
     output: usage?.completion_tokens ?? 0,
@@ -295,25 +304,42 @@ report(
 
 // --- B. the zero-inference key check -----------------------------------------
 
-const goodProbe = await raw("B", "POST /chat/completions {}", "/chat/completions", {
+const emptyGood = await raw("B", "POST {} (real key)", "/chat/completions", {
   method: "POST",
   body: "{}",
 });
-const badProbe = await raw("B", "POST /chat/completions {} (bad key)", "/chat/completions", {
+const emptyBad = await raw("B", "POST {} (bogus key)", "/chat/completions", {
   method: "POST",
   body: "{}",
   auth: "bad",
 });
+const unknownGood = await raw("B", "POST unknown model (real key)", "/chat/completions", {
+  method: "POST",
+  body: JSON.stringify({ model: "poolside/does-not-exist-xyz", messages: [{ role: "user", content: "hi" }], max_tokens: 8 }),
+});
+const unknownBad = await raw("B", "POST unknown model (bogus key)", "/chat/completions", {
+  method: "POST",
+  body: JSON.stringify({ model: "poolside/does-not-exist-xyz", messages: [{ role: "user", content: "hi" }], max_tokens: 8 }),
+  auth: "bad",
+});
 const noAuth = await raw("B", "GET /v1/models (no Authorization header)", "/models", { auth: "none" });
 const probeResult = await probeKey(KEY, BASE_URL);
+const badProbeProbe = await probeKey("sky_bogus_key_000000000000000000000000", BASE_URL);
 report(
-  "B. key validation without inference, and 401 ≠ 403",
-  goodProbe.status === 400 && badProbe.status === 403 && noAuth.status === 401 &&
-    probeResult === "valid",
-  `{} with the real key -> HTTP ${goodProbe.status} ${goodProbe.text.slice(0, 80)}\n` +
-    `{} with a bogus key -> HTTP ${badProbe.status} ${badProbe.text.slice(0, 80)}\n` +
-    `no Authorization header at all -> HTTP ${noAuth.status} ${noAuth.text.slice(0, 80)}\n` +
-    `probeKey() -> ${probeResult} (400 = key authenticated, free)`,
+  "B. key validation without inference; 401 ≠ 403; and the empty-body trap",
+  emptyGood.status === 400 && emptyBad.status === 400 &&
+    unknownGood.status === 404 && unknownBad.status === 403 &&
+    noAuth.status === 401 && probeResult === "valid" && badProbeProbe === "invalid",
+  `{} with the real key  -> HTTP ${emptyGood.status} ${emptyGood.text.trim().slice(0, 80)}\n` +
+    `{} with a bogus key  -> HTTP ${emptyBad.status} ${emptyBad.text.trim().slice(0, 80)}\n` +
+    "  ^ the SAME 400 for both: the body is validated before the key, so the generic " +
+    "\"empty body — 400 means the key authenticated\" recipe would accept a wrong key here.\n\n" +
+    `unknown model + real key  -> HTTP ${unknownGood.status} ${unknownGood.text.trim().slice(0, 80)}\n` +
+    `unknown model + bogus key -> HTTP ${unknownBad.status} ${unknownBad.text.trim().slice(0, 80)}\n` +
+    "  ^ the probe that does work: body parsed first, then the key, then the model id.\n\n" +
+    `no Authorization header at all -> HTTP ${noAuth.status} ${noAuth.text.trim().slice(0, 80)}\n` +
+    `probeKey(real key) -> ${probeResult}; probeKey(bogus key) -> ${badProbeProbe} ` +
+    "(both free: 404 and 403 are pre-inference rejections)",
 );
 
 // --- C. pre-inference rejections ---------------------------------------------
@@ -415,34 +441,67 @@ if (SKIP_COSTLY) {
   );
 
   // --- F. the paired reasoning-echo experiment --------------------------------
-  const firstTurn = [
-    { role: "user", content: "What is 2+2? Think it through." },
-    { role: "assistant", content: "4", reasoning_content: "The user asks 2+2. That is 4." },
-    { role: "user", content: "Now what is 3+3? Think it through." },
-  ];
-  const echoed = await streamLive("F", "second turn WITH reasoning_content", {
-    model: model.id,
-    messages: firstTurn,
-    max_tokens: 96,
-  });
-  const silent = await streamLive("F", "second turn WITHOUT reasoning_content", {
-    model: model.id,
-    messages: [
-      { role: "user", content: "What is 2+2? Think it through." },
-      { role: "assistant", content: "4" },
-      { role: "user", content: "Now what is 3+3? Think it through." },
-    ],
-    max_tokens: 96,
-  });
+  //
+  // The vendor documents an *effect*: "dropping previous reasoning content can
+  // prevent the model from reasoning in later steps". This build ran the paired
+  // experiment and **could not reproduce it**: two rounds of the same pair gave
+  // opposite answers, so what is asserted here is the reproducible half — the
+  // echoed form is accepted and works — and the numbers are printed rather than
+  // summarised into a claim the evidence does not support (pitfalls L3).
+  const PAIRS = 3;
+  const echoedArm: number[] = [];
+  const silentArm: number[] = [];
+  const armsAccepted: boolean[] = [];
+
+  for (let pair = 0; pair < PAIRS; pair++) {
+    const echoed = await streamLive("F", `pair ${pair + 1}: WITH reasoning_content`, {
+      model: model.id,
+      messages: [
+        { role: "user", content: "What is 2+2? Think it through." },
+        { role: "assistant", content: "4", reasoning_content: "The user asks 2+2. That is 4." },
+        { role: "user", content: "Now what is 3+3? Think it through." },
+      ],
+      max_tokens: 96,
+    });
+    const silent = await streamLive("F", `pair ${pair + 1}: WITHOUT reasoning_content`, {
+      model: model.id,
+      messages: [
+        { role: "user", content: "What is 2+2? Think it through." },
+        { role: "assistant", content: "4" },
+        { role: "user", content: "Now what is 3+3? Think it through." },
+      ],
+      max_tokens: 96,
+    });
+    echoedArm.push(echoed.usage!.reasoning ?? 0);
+    silentArm.push(silent.usage!.reasoning ?? 0);
+    armsAccepted.push(echoed.stopReason !== "error" && silent.stopReason !== "error");
+  }
+
+  // The *documented* failure direction is "no echo ⇒ no reasoning", i.e. a silent
+  // arm with zero reasoning tokens while the echoed arm has some.
+  const reproduced = echoedArm.filter((tokens, index) => tokens > 0 && silentArm[index] === 0).length;
   report(
-    "F. dropping reasoning_content stops the model from reasoning (paired control)",
-    echoed.usage!.reasoning! > 0 && silent.usage!.reasoning === 0,
-    `with reasoning_content echoed -> reasoning_tokens ${echoed.usage!.reasoning}, ` +
-      `reasoning_content ${typeof (echoed as any).reasoning_content === "string" ? "present" : "absent"}\n` +
-      `without it (the only difference) -> reasoning_tokens ${silent.usage!.reasoning}, ` +
-      `reasoning_content ${JSON.stringify((silent as any).reasoning_content)}\n` +
-      "Note: n=1 per arm. The difference is categorical (0 vs non-zero) rather than a " +
-      "quantity, and it is the effect the provider's documentation predicts.",
+    "F. reasoning_content is accepted on the assistant message (the *effect* did not reproduce)",
+    // The reproducible claim is acceptance, nothing more: the responded-with-reasoning
+    // arm is what pi sends, and it must not be rejected or empty. A stronger
+    // assertion (e.g. "the echoed arm always reasons") fails on this provider's
+    // own variance, which is precisely the finding.
+    armsAccepted.every(Boolean),
+    `reasoning tokens on the second turn, per pair (with echo -> without echo):\n` +
+      echoedArm.map((tokens, index) => `  pair ${index + 1}: ${tokens} -> ${silentArm[index]}`).join("\n") +
+      `\n\nNote the plateau: the WITHOUT arm sat exactly at the 96-token cap in all three pairs, ` +
+      `so its token count measures the cap, not the model's willingness to reason.\n\n` +
+      `The vendor's documented failure ("dropping previous reasoning content can prevent the ` +
+      `model from reasoning in later steps", docs.poolside.ai § Preserve reasoning in agentic ` +
+      `workflows) reproduced in ${reproduced}/${PAIRS} pairs — so it is NOT confirmed by this ` +
+      `build. The first pair measured during development looked like a textbook confirmation ` +
+      `(62 -> 0 reasoning tokens) and the very next pair inverted it (25 -> 96).\n\n` +
+      `What *is* measured and reproducible: the echoed request is accepted (200) and the model ` +
+      `keeps reasoning on the second turn, so sending the field back costs nothing and is what ` +
+      `the provider asks for. The plugin sets requiresReasoningContentOnAssistantMessages on ` +
+      `that basis, with the wire shape proved offline in test/wire-format.test.ts.\n` +
+      `To settle the effect properly: 10+ pairs, one variable, and a fixed prompt; the free key ` +
+      `makes that affordable.`,
   );
 
   // --- G. tools --------------------------------------------------------------
@@ -562,14 +621,17 @@ if (SKIP_COSTLY) {
 
 const errorCases: { name: string; result: RawResult; expectStatus: number }[] = [
   { name: "no Authorization header", result: noAuth, expectStatus: 401 },
-  { name: "wrong key", result: badProbe, expectStatus: 403 },
+  { name: "wrong key", result: unknownBad, expectStatus: 403 },
+  { name: "unknown model (good key)", result: unknownGood, expectStatus: 404 },
   {
-    name: "unknown model",
-    result: await raw("I", "POST (unknown model)", "/chat/completions", {
-      method: "POST",
-      body: JSON.stringify({ model: "poolside/does-not-exist-xyz", messages: [{ role: "user", content: "hi" }], max_tokens: 8 }),
-    }),
-    expectStatus: 404,
+    name: "unknown model (bogus key)",
+    result: unknownBad,
+    expectStatus: 403,
+  },
+  {
+    name: "empty body, which is what a bogus key also gets",
+    result: emptyBad,
+    expectStatus: 400,
   },
 ];
 

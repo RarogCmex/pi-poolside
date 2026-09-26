@@ -324,11 +324,14 @@ describe("clarifyPoolsideError distinguishes the two auth failures", () => {
     assert.match(message, /1\.\.262144/);
   });
 
-  test("the empty body — the /login probe's own rejection — is explained", () => {
+  test("the empty body is explained as a body-parser rejection, not as a key check", () => {
     const message = clarifyPoolsideError("400 Invalid request body");
     assert.ok(message);
     assert.match(message, /could not parse the request body/);
-    assert.match(message, /zero-inference key check/);
+    // The measured trap: this 400 arrives for a bad key too, so a tool that reads
+    // it as "the key is fine" is measuring the body parser.
+    assert.match(message, /before\* any auth check/);
+    assert.match(message, /for a bogus one alike/);
   });
 
   test("the 502 proxy page is explained, with the measured trigger", () => {

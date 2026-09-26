@@ -324,9 +324,11 @@ export function clarifyPoolsideError(errorMessage: string): string | undefined {
 
   if (INVALID_BODY_RE.test(both)) {
     return (
-      `${SENTINEL} the gateway could not parse the request body (HTTP ${status ?? 400}), ` +
-      "which is what an empty body gets — the same rejection this plugin's `/login` uses as a " +
-      "zero-inference key check. Original: " +
+      `${SENTINEL} the gateway could not parse the request body (HTTP ${status ?? 400}). This ` +
+      "arrives *before* any auth check: an empty body gets it for a valid key and for a bogus " +
+      "one alike, which is why it is not a usable key check (see `provider.ts` `probeKey`). A " +
+      "plugin or tool that treats this 400 as \"the key is fine\" is measuring the body parser. " +
+      "Original: " +
       message
     );
   }

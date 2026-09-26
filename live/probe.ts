@@ -176,6 +176,31 @@ const PROBES: Record<string, Probe> = {
     note: "POST /v1/embeddings",
   },
   root: { path: "/", authMode: "key", note: "GET /v1" },
+  // Validation order: does a wrong key lose to a bad body, or win over it?
+  "badkey-unknown-model": {
+    path: "/chat/completions",
+    method: "POST",
+    authMode: "literal",
+    authLiteral: "sky_bogus_key_000000000000000000000000",
+    body: { model: "poolside/does-not-exist-xyz", messages: [{ role: "user", content: "hi" }], max_tokens: 8 },
+    note: "wrong key + unknown model (which check runs first?)",
+  },
+  "badkey-overcap": {
+    path: "/chat/completions",
+    method: "POST",
+    authMode: "literal",
+    authLiteral: "sky_bogus_key_000000000000000000000000",
+    body: { model: "poolside/laguna-xs-2.1", messages: [{ role: "user", content: "hi" }], max_tokens: 99999999 },
+    note: "wrong key + over-cap max_tokens",
+  },
+  "badkey-empty-body": {
+    path: "/chat/completions",
+    method: "POST",
+    authMode: "literal",
+    authLiteral: "sky_bogus_key_000000000000000000000000",
+    body: {},
+    note: "wrong key + empty body (the naive zero-inference probe)",
+  },
   // --- tiny generations (billed, max_tokens <= 16 unless tool shape needs more) ---
   "gen-thinking-off": {
     path: "/chat/completions",
@@ -200,6 +225,21 @@ const PROBES: Record<string, Probe> = {
       chat_template_kwargs: { enable_thinking: true },
     },
     note: "tiny generation, thinking on via chat_template_kwargs",
+  },
+  "gen-thinking-on-system": {
+    path: "/chat/completions",
+    method: "POST",
+    authMode: "key",
+    body: {
+      model: "poolside/laguna-xs-2.1",
+      messages: [
+        { role: "system", content: "You are pi, a coding agent. Tools: bash, read, edit. Be concise." },
+        { role: "user", content: "say ok" },
+      ],
+      max_tokens: 200,
+      chat_template_kwargs: { enable_thinking: true },
+    },
+    note: "does a system prompt change whether enable_thinking:true produces reasoning?",
   },
   "gen-reasoning-effort-off": {
     path: "/chat/completions",

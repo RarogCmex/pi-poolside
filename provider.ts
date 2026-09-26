@@ -35,15 +35,38 @@ export function resolveBaseUrl(env: EnvReader = processEnv): string {
 export type KeyProbeResult = "valid" | "invalid" | "unknown";
 
 /**
- * Zero-inference key check: `POST /chat/completions` with an empty JSON body.
+ * The model id the key probe asks for. It does not exist, which is the point:
+ * this gateway validates the request body *before* the key and the model id
+ * *after* it, so a structurally valid request for an unknown id is answered
+ * `404` for a good key and `403` for a wrong one — both pre-inference, both free.
+ */
+export const KEY_PROBE_MODEL_ID = "poolside/key-probe-nonexistent";
+
+/**
+ * Zero-inference key check.
  *
- * Measured 2026-09-26 (`research/raw/empty-body.txt`): `{}` is rejected *before*
- * any inference with `400 {"error":"Invalid request body"}`, while a wrong key is
- * answered `403 {"error":"please check the api-key you provided"}`
- * (`research/raw/badkey-chat.txt`) and a request with no `Authorization` header
- * at all gets `401 No Authorization header provided`
- * (`research/raw/listing-noauth.txt`). A rejection is not billed, so this is
- * free — which is the only reason it may run during `/login`.
+ * **The obvious probe does not work here, and that was measured.** The generic
+ * recipe ("`POST` an empty body — a `400` means the key authenticated") returns
+ * `400 {"error":"Invalid request body"}` for *any* key, good or bad
+ * (`research/raw/badkey-empty-body.txt`: a bogus key plus `{}` is a **400**, not
+ * a 403). Taking that 400 as "the key is valid" would accept a wrong key and save
+ * it, which is a `/login` that silently does the opposite of its job.
+ *
+ * What the gateway does instead, measured 2026-09-26:
+ *
+ * | request | good key | wrong key |
+ * |---|---|---|
+ * | `{}` | 400 `Invalid request body` | **400** `Invalid request body` |
+ * | valid shape, unknown model | 404 `please check the model you provided` | **403** `please check the api-key you provided` |
+ * | valid shape, `max_tokens: 99999999` | 400 range error | **403** |
+ * | valid shape, real model | 200 (billed) | **403** |
+ *
+ * So the body is parsed first, then the key, then the model and the ranges. The
+ * probe therefore sends a **structurally valid** request for an id that cannot
+ * exist: `404` means the key was accepted and no inference happened, `401`/`403`
+ * mean the key was not. `max_tokens: 1` bounds the worst case — if a future
+ * gateway ever accepted an unknown id, this could produce a single token rather
+ * than nothing.
  *
  * `/models` is deliberately **not** used for the check even though it is the
  * cheaper call: `GET /models` with a wrong key answers 403 and then **resets the
@@ -63,7 +86,11 @@ export async function probeKey(
     const response = await fetchImpl(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: "{}",
+      body: JSON.stringify({
+        model: KEY_PROBE_MODEL_ID,
+        messages: [{ role: "user", content: "key check" }],
+        max_tokens: 1,
+      }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (response.status === 401 || response.status === 403) return "invalid";
@@ -96,9 +123,9 @@ export function poolsideApiKeyAuth(
       interaction.notify({
         type: "info",
         message:
-          "Paste a Poolside API key (`sky_…`, from platform.poolside.ai). The free key is " +
-          "validated with an empty-body request that the gateway rejects before inference, " +
-          "so no tokens are generated.",
+          "Paste a Poolside API key (`sky_…`, from platform.poolside.ai). It is checked with a " +
+          "request for a model id that cannot exist, which the gateway rejects before inference " +
+          "— so no tokens are generated either way.",
       });
       const entered = await interaction.prompt({
         type: "secret",

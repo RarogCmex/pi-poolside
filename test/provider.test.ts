@@ -17,6 +17,7 @@ import {
   API_KEY_ENV_VAR,
   BASE_URL_ENV_VAR,
   buildPoolsideProvider,
+  KEY_PROBE_MODEL_ID,
   poolsideApiKeyAuth,
   probeKey,
   resolveBaseUrl,
@@ -88,16 +89,37 @@ describe("resolveBaseUrl", () => {
 });
 
 describe("probeKey — a key check that costs no tokens", () => {
-  test("a rejected empty body means the key authenticated", async () => {
-    // Measured: `{}` is answered `400 {"error":"Invalid request body"}` before
-    // any inference (recorded); the same request with a wrong key is 403.
-    let seenBody: string | undefined;
+  test("404 for an impossible model id means the key was accepted", async () => {
+    // Measured: this gateway parses the body first, then the key, then the model
+    // id — so a structurally valid request for a non-existent id is a pre-inference
+    // 404 for a good key and a 403 for a wrong one.
+    let seenBody: Record<string, unknown> | undefined;
     const result = await probeKey("sky_test", DEFAULT_BASE_URL, (async (_url: unknown, init?: RequestInit) => {
-      seenBody = String(init?.body);
-      return new Response('{"error":"Invalid request body"}', { status: 400 });
+      seenBody = JSON.parse(String(init?.body));
+      return new Response('{"error":"please check the model you provided"}', { status: 404 });
     }) as unknown as typeof fetch);
     assert.equal(result, "valid");
-    assert.equal(seenBody, "{}", "the probe must send no messages, so nothing can be generated");
+    assert.equal(seenBody?.model, KEY_PROBE_MODEL_ID);
+    assert.equal(seenBody?.max_tokens, 1, "the cap bounds the worst case if the id ever resolved");
+    assert.ok(Array.isArray(seenBody?.messages) && seenBody.messages.length > 0,
+      "the body must be structurally valid, or the body check wins and the key is never examined");
+  });
+
+  test("a 400 on the empty body is NOT read as a valid key", async () => {
+    // The trap this probe was redesigned around: `{}` is answered 400 for a good
+    // key *and* for a bogus one (recorded: `badkey-empty-body`), so a 400 must
+    // never be treated as proof of a working key.
+    const result = await probeKey("sky_bogus", DEFAULT_BASE_URL, (async () =>
+      new Response('{"error":"Invalid request body"}', { status: 400 })) as unknown as typeof fetch);
+    assert.notEqual(result, "invalid", "a 400 is not a 403 — but see the next assertion");
+    // The decisive guard is that the probe never *sends* an empty body: it must
+    // send a structurally valid one so that the gateway reaches the key check.
+    let body: Record<string, unknown> | undefined;
+    await probeKey("sky_bogus", DEFAULT_BASE_URL, (async (_url: unknown, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body));
+      return new Response("", { status: 403 });
+    }) as unknown as typeof fetch);
+    assert.ok(body && Object.keys(body).length > 0, "the probe sent an empty body");
   });
 
   test("403 is an invalid key, 401 too", async () => {
@@ -126,20 +148,15 @@ describe("probeKey — a key check that costs no tokens", () => {
     let url: string | undefined;
     await probeKey("sky_test", "https://host/v1/", (async (input: unknown) => {
       url = String(input);
-      return new Response("", { status: 400 });
+      return new Response("", { status: 404 });
     }) as unknown as typeof fetch);
     assert.equal(url, "https://host/v1/chat/completions");
   });
 
-  test("the probe is idempotent in the sense that matters: it never sends a prompt", async () => {
-    // Guard against a future edit that "improves" the probe into a real
-    // generation: the body must stay a bare `{}`.
-    let body = "";
-    await probeKey("sky_test", DEFAULT_BASE_URL, (async (_url: unknown, init?: RequestInit) => {
-      body = String(init?.body ?? "");
-      return new Response("", { status: 400 });
-    }) as unknown as typeof fetch);
-    assert.ok(!body.includes("messages"), "the key probe sent a prompt");
+  test("the probe asks for a model id that cannot exist", () => {
+    // If this id ever became real the probe would generate a token; the test is
+    // here so the id cannot be changed into a live one by accident.
+    assert.match(KEY_PROBE_MODEL_ID, /nonexistent/);
   });
 });
 
@@ -147,7 +164,7 @@ describe("poolsideApiKeyAuth", () => {
   test("login validates a good key and saves it trimmed", async () => {
     const { interaction } = fakeInteraction("  sky_good  ");
     const auth = poolsideApiKeyAuth(() => DEFAULT_BASE_URL, (async () =>
-      new Response('{"error":"Invalid request body"}', { status: 400 })) as unknown as typeof fetch);
+      new Response('{"error":"please check the model you provided"}', { status: 404 })) as unknown as typeof fetch);
     const credential = await auth.login!(interaction);
     assert.deepEqual(credential, { type: "api_key", key: "sky_good" });
   });
@@ -173,7 +190,7 @@ describe("poolsideApiKeyAuth", () => {
     const { interaction } = fakeInteraction("   ");
     const auth = poolsideApiKeyAuth(() => DEFAULT_BASE_URL, (async () => {
       called = true;
-      return new Response("", { status: 400 });
+      return new Response("", { status: 404 });
     }) as unknown as typeof fetch);
     await assert.rejects(() => auth.login!(interaction), /No API key entered/);
     assert.equal(called, false, "an empty entry must not spend a request");
@@ -182,7 +199,7 @@ describe("poolsideApiKeyAuth", () => {
   test("login warns about a non-sky_ prefix but still checks it", async () => {
     const { interaction, notifications } = fakeInteraction("nvidia-key");
     const auth = poolsideApiKeyAuth(() => DEFAULT_BASE_URL, (async () =>
-      new Response("", { status: 400 })) as unknown as typeof fetch);
+      new Response("", { status: 404 })) as unknown as typeof fetch);
     assert.deepEqual(await auth.login!(interaction), { type: "api_key", key: "nvidia-key" });
     assert.ok(notifications.some((message) => /does not look like a Poolside key/.test(message)));
   });
