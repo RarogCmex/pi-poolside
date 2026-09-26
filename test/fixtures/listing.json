@@ -1,0 +1,70 @@
+{
+  "data": [
+    {
+      "id": "poolside/laguna-xs-2.1",
+      "name": "Laguna XS 2.1",
+      "object": "model",
+      "created": 1782829645,
+      "is_free": true,
+      "pricing": {
+        "image": "0",
+        "prompt": "0",
+        "request": "0",
+        "completion": "0",
+        "input_cache_read": "0"
+      },
+      "owned_by": "poolside",
+      "description": "Our lightest and fastest agentic coding model.",
+      "quantization": "fp8",
+      "context_length": 262144,
+      "hugging_face_id": "poolside/Laguna-XS-2.1",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "supported_features": [
+        "tools",
+        "reasoning"
+      ],
+      "max_completion_tokens": 32768,
+      "supported_sampling_parameters": [
+        "temperature"
+      ]
+    },
+    {
+      "id": "poolside/laguna-s-2.1",
+      "name": "Laguna S 2.1",
+      "object": "model",
+      "created": 1783357794,
+      "is_free": true,
+      "pricing": {
+        "image": "0",
+        "prompt": "0",
+        "request": "0",
+        "completion": "0",
+        "input_cache_read": "0"
+      },
+      "owned_by": "poolside",
+      "description": "Our most capable model. Frontier-class reasoning at mid-size cost.",
+      "quantization": "fp4",
+      "context_length": 262144,
+      "hugging_face_id": "poolside/Laguna-S-2.1",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "supported_features": [
+        "tools",
+        "reasoning"
+      ],
+      "max_completion_tokens": 32768,
+      "supported_sampling_parameters": [
+        "temperature"
+      ]
+    }
+  ]
+}

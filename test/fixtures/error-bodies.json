@@ -1,0 +1,113 @@
+{
+  "$comment": "Recorded verbatim from https://inference.poolside.ai/v1 on 2026-09-26 (see research/raw/*.txt and live/probe.ts). Do not hand-edit: regenerate with `node live/make-error-fixtures.ts`.",
+  "no-auth-header": {
+    "case": "401 plain text — no `Authorization` header at all",
+    "note": "The header is absent, not empty: `curl -H 'Authorization: ...'`-less requests only.",
+    "status": 401,
+    "contentType": "text/plain; charset=utf-8",
+    "body": "No Authorization header provided",
+    "recordedFile": "research/raw/listing-noauth.txt",
+    "attempts": 1,
+    "transportReset": false,
+    "deterministic5xx": false
+  },
+  "empty-bearer": {
+    "case": "502 HTML — `Authorization: Bearer ` with an empty value",
+    "note": "Deterministic: 4/4 attempts returned this exact body. The front proxy answers, not the API.",
+    "status": 502,
+    "contentType": "text/html; charset=UTF-8",
+    "body": "\n<html><head>\n<meta http-equiv=\"content-type\" content=\"text/html;charset=utf-8\">\n<title>502 Server Error</title>\n</head>\n<body text=#000000 bgcolor=#ffffff>\n<h1>Error: Server Error</h1>\n<h2>The server encountered a temporary error and could not complete your request.<p>Please try again in 30 seconds.</h2>\n<h2></h2>\n</body></html>",
+    "recordedFile": "research/raw/listing-empty-auth.txt",
+    "attempts": 4,
+    "transportReset": false,
+    "deterministic5xx": true
+  },
+  "bad-key-listing": {
+    "case": "403 with NO readable body — the server resets the stream on GET /models with a wrong key",
+    "note": "Reproduced repeatedly: node/undici reports `403` and then `terminated` (ERR_HTTP2_STREAM_ERROR NGHTTP2_INTERNAL_ERROR), and `curl` independently reports `HTTP/2 stream 1 reset by server (error 0x2 INTERNAL_ERROR)` after `HTTP 403`, over both h2 and http1.1. The *status* is deterministic (0.3-0.5 s) but the body never arrives, so this fixture records a status without a body.",
+    "status": 403,
+    "contentType": "application/json",
+    "body": null,
+    "recordedFile": "research/raw/listing-badkey.txt",
+    "attempts": 1,
+    "transportReset": true,
+    "deterministic5xx": false
+  },
+  "bad-key-chat": {
+    "case": "403 `{\"error\":\"<string>\"}` on POST /chat/completions with a wrong key",
+    "note": "Same dialect on the chat route; ~0.4 s, deterministic.",
+    "status": 403,
+    "contentType": "application/json",
+    "body": "{\"error\":\"please check the api-key you provided\"}",
+    "recordedFile": "research/raw/badkey-chat.txt",
+    "attempts": 1,
+    "transportReset": false,
+    "deterministic5xx": false
+  },
+  "unknown-model": {
+    "case": "404 `{\"error\":\"<string>\"}` for an unknown model id",
+    "note": "String dialect again.",
+    "status": 404,
+    "contentType": "application/json",
+    "body": "{\"error\":\"please check the model you provided\"}",
+    "recordedFile": "research/raw/unknown-model.txt",
+    "attempts": 1,
+    "transportReset": false,
+    "deterministic5xx": false
+  },
+  "empty-json-body": {
+    "case": "400 `{\"error\":\"<string>\"}` for `{}` — the zero-inference key check",
+    "note": "A rejection, so it is free and proves the key authenticated.",
+    "status": 400,
+    "contentType": "application/json",
+    "body": "{\"error\":\"Invalid request body\"}",
+    "recordedFile": "research/raw/empty-body.txt",
+    "attempts": 1,
+    "transportReset": false,
+    "deterministic5xx": false
+  },
+  "max-tokens-range": {
+    "case": "400 enveloped `{\"error\":{\"code\",\"message\",\"type\"}}` for max_tokens over the cap",
+    "note": "Discloses the ceiling (262144) pre-inference, for free.",
+    "status": 400,
+    "contentType": "application/json",
+    "body": "{\n\t\"error\": {\n\t\t\"code\": 400,\n\t\t\"message\": \"Invalid request: ['max_tokens (99999999): Input should be less than or equal to 262144']\",\n\t\t\"type\": \"Bad Request\"\n\t}\n}",
+    "recordedFile": "research/raw/max-tokens-too-big.txt",
+    "attempts": 1,
+    "transportReset": false,
+    "deterministic5xx": false
+  },
+  "extra-inputs": {
+    "case": "400 enveloped rejection of `max_completion_tokens`",
+    "note": "`Extra inputs are not permitted` — the listing field is not a request field.",
+    "status": 400,
+    "contentType": "application/json",
+    "body": "{\n\t\"error\": {\n\t\t\"code\": 400,\n\t\t\"message\": \"Invalid request: ['max_completion_tokens (8): Extra inputs are not permitted']\",\n\t\t\"type\": \"Bad Request\"\n\t}\n}",
+    "recordedFile": "research/raw/max-completion-tokens-field.txt",
+    "attempts": 1,
+    "transportReset": false,
+    "deterministic5xx": false
+  },
+  "temperature-range": {
+    "case": "400 enveloped `Validation: Temperature must be between 0 and 2`",
+    "note": "Same envelope as the max_tokens range error.",
+    "status": 400,
+    "contentType": "application/json",
+    "body": "{\n\t\"error\": {\n\t\t\"code\": 400,\n\t\t\"message\": \"Validation: Temperature must be between 0 and 2, got 3\",\n\t\t\"type\": \"Bad Request\"\n\t}\n}",
+    "recordedFile": "research/raw/temperature-3.txt",
+    "attempts": 1,
+    "transportReset": false,
+    "deterministic5xx": false
+  },
+  "embeddings-absent": {
+    "case": "404 enveloped `Model not found` for POST /v1/embeddings",
+    "note": "Surface check: no embedding model is listed.",
+    "status": 404,
+    "contentType": "application/json",
+    "body": "{\n\t\"error\": {\n\t\t\"code\": 404,\n\t\t\"message\": \"Model not found\",\n\t\t\"type\": \"Not Found\"\n\t}\n}",
+    "recordedFile": "research/raw/embeddings-surface.txt",
+    "attempts": 1,
+    "transportReset": false,
+    "deterministic5xx": false
+  }
+}
