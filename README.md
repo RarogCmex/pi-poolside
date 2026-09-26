@@ -12,9 +12,12 @@ dialects this API actually produces — all measured, see
 [`research/2026-09-26-live-verification.md`](research/2026-09-26-live-verification.md).
 
 ```
-/plugin install pi-poolside     # or: pi install ./pi-poolside
-/login poolside                 # or: export POOLSIDE_API_KEY=sky_…
+pi install ./pi-poolside   # or: pi install git:github.com/<you>/pi-poolside
+/login poolside            # or: export POOLSIDE_API_KEY=sky_…
 ```
+
+`POOLSIDE_BASE_URL` overrides the endpoint (a mirror, or the self-managed
+`https://<model-hostname>/v1` endpoint the vendor's Pi page describes).
 
 ## Models
 
@@ -206,7 +209,13 @@ Every 2xx is itemised. Latest full harness run (22 requests):
 | SSE stream | 200 | 46 | 2 | 0 | 32 |
 | `/v1/messages`, `/v1/responses` | 200 | 14, 46 | 1, 1 | 0, 1 | 0, 32 |
 | `/v1/embeddings` | 404 | 0 | 0 | 0 | 0 |
-| **totals** | 13 × 2xx, 9 × free 4xx | **852** | **253** (209 reasoning) | | **240** |
+| **totals** | 13 × 2xx, 9 × free 4xx | **852** | **556** (515 reasoning) | | **336** |
+
+Re-running the harness gives different totals in the reasoning-pair rows and
+sometimes in `enable_thinking: true` (0 or 16 reasoning tokens): the model
+decides whether to think, so those cells are the model's choice rather than a
+fixed property of the request. Two earlier full runs totalled 180 and 253 output
+tokens with the same 22-request shape.
 
 Bound: every generative request uses `max_tokens ≤ 16` except the tool
 round-trip (256) and the reasoning pairs (96); each request is paced 3 s apart;

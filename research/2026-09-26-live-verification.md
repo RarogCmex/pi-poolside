@@ -47,6 +47,12 @@ Third full harness run (`npm run live`, 22 requests):
 Totals for that run: 22 requests, 13 answered 2xx, 9 rejected pre-inference
 (free); **input 852, output 253 (of which 209 reasoning), cache reads 240**.
 
+A later run of the same harness (the one quoted in the README cost log) totalled
+**output 556, of which 515 reasoning, cache reads 336** with the identical
+22-request shape: the reasoning-pair rows and `enable_thinking: true` vary
+because the model decides whether to think. Both runs are itemised above; the
+numbers differ, the *bound* does not.
+
 Two earlier full runs, plus the exploratory probes behind `research/raw/`, are
 not itemised row by row here; they were bounded the same way (`max_tokens ≤ 16`
 except the 256-token tool probe and the 96-token pairs) and their totals are of
