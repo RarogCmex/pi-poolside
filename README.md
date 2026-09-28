@@ -12,7 +12,7 @@ dialects this API actually produces — all measured, see
 [`research/2026-09-26-live-verification.md`](research/2026-09-26-live-verification.md).
 
 ```
-pi install ./pi-poolside   # or: pi install git:github.com/<you>/pi-poolside
+pi install git:github.com/RarogCmex/pi-poolside@main   # or a local checkout: pi install ./pi-poolside
 /login poolside            # or: export POOLSIDE_API_KEY=sky_…
 ```
 

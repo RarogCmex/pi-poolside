@@ -220,7 +220,7 @@ plugin sends none.
 
 | what | command | result |
 |---|---|---|
-| install | `pi install /Users/rarogcmex/pi-plugins/pi-poolside` | `Installed` |
+| install | `pi install /path/to/pi-poolside` | `Installed` |
 | picker | `pi --list-models \| grep poolside` | `poolside poolside/laguna-s-2.1 262.1K 32.8K yes no` and the xs row |
 | plain print | `pi -p --model poolside/poolside/laguna-xs-2.1 --thinking off "Reply with exactly: poolside ok"` | `poolside ok` |
 | default thinking | same without `--thinking off` | `poolside ok` |
