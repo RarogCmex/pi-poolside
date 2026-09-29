@@ -21,9 +21,10 @@ import { DEFAULT_BASE_URL } from "../models.ts";
 const realFetch = globalThis.fetch;
 
 /**
- * Env coupling guard: this suite must pass whether or not the caller has done
- * `set -a; . ./secret.env` (the house way to run the live harness), so ambient
- * provider variables are removed for the duration and restored afterwards.
+ * Env coupling guard: this suite must pass whether or not the caller has
+ * `POOLSIDE_API_KEY` exported (e.g. after running the live harness in the same
+ * shell), so ambient provider variables are removed for the duration and
+ * restored afterwards.
  */
 const AMBIENT = ["POOLSIDE_API_KEY", "POOLSIDE_BASE_URL"] as const;
 const savedEnv: Record<string, string | undefined> = {};
