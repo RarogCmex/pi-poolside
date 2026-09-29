@@ -6,9 +6,9 @@ otherwise. Raw bodies for the free probes are in `research/raw/` (gitignored;
 regenerate with `node live/probe.ts <name>`), and the committed fixtures are
 generated from them by `live/make-error-fixtures.ts`.
 
-The recon handoff (`research/2026-09-26-recon-handoff.md`) was **not** re-measured
-as a whole. Where this build checked one of its claims and got a different
-answer, the difference is recorded under "Where the recon was wrong" at the end.
+An earlier reconnaissance pass was **not** re-measured as a whole. Where this
+build checked one of its claims and got a different answer, the difference is
+recorded under "Where the recon was wrong" at the end.
 
 ## Cost
 
@@ -184,7 +184,7 @@ below). What it buys — verified, not assumed:
 
 The body is parsed first, then the key, then the model id and the ranges. The
 generic "POST an empty body and read a 400 as proof the key authenticated" recipe
-— which the plugin skill suggests and the recon repeated — **accepts a wrong key
+— a commonly suggested recipe which the earlier recon repeated — **accepts a wrong key
 here**. `probeKey` sends a structurally valid request for an id that cannot exist
 instead: 404 = key accepted (free), 401/403 = not. Both are pre-inference.
 
@@ -236,13 +236,13 @@ The wire bodies in the two agent runs were captured with a temporary
 `max_completion_tokens`, `reasoning_effort`, `reasoning`, `store` and
 `prompt_cache_retention`.
 
-## Where the recon handoff was wrong
+## Corrections to the earlier reconnaissance pass
 
-1. **`nvidia` context window.** The handoff says pi's bundled `nvidia` entry for
+1. **`nvidia` context window.** The earlier pass said pi's bundled `nvidia` entry for
    `poolside/laguna-xs-2.1` has `contextWindow: 131072` — "half the real 262144".
    In the installed pi 0.87.1 (`pi-ai/dist/providers/data/nvidia.json`) it is
    **262144** with `maxTokens: 16384` and `maxTokensField: "max_tokens"`. So pi's
-   bundled numbers are not stale about the window; the handoff's claim is. (The
+   bundled numbers are not stale about the window; the earlier claim is. (The
    installed `openrouter` entries do carry 262144 too, plus a *1 048 576* window
    for the paid `laguna-s-2.1` — larger than the direct endpoint's 262144.)
 2. **"Survives the SDK? no" for three of four error rows.** Measured on pi-ai
@@ -250,17 +250,17 @@ The wire bodies in the two agent runs were captured with a temporary
    survive (quoted). Only the JSON *envelope* is ugly, and the HTML 502 page is
    unreadable. Body recovery is justified — for those reasons, not for a dropped
    body.
-3. **The empty-body key check.** The handoff (following the plugin skill's
+3. **The empty-body key check.** The earlier pass (following that same
    generic recipe) implies a `400` on an empty body proves the key. Measured: a
    bogus key gets the same `400 Invalid request body`. See § "Validation order".
 4. **`reasoning_content` preservation as a *requirement to implement*.** The
    requirement is real and documented, and the echo is now proved — but the
-   handoff's framing ("otherwise the model stops thinking on the following
+   earlier framing ("otherwise the model stops thinking on the following
    steps") was not reproducible here in either direction (§ 3).
-5. **Minor**: the handoff's table lists `quantization: fp8` for both ids; the
+5. **Minor**: the earlier pass's table lists `quantization: fp8` for both ids; the
    listing says `fp8` for `laguna-xs-2.1` and **`fp4`** for `laguna-s-2.1`.
 
-Everything else the handoff measured was confirmed: the two ids and their
+Everything else the earlier pass measured was confirmed: the two ids and their
 metadata, the `max_tokens` field and its 1..262144 range, the
 `max_completion_tokens` rejection, `temperature` 0..2, the 401/403/404/400
 dialects, thinking on by default and boolean off, the reasoning field name, the
