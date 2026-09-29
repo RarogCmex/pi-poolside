@@ -252,7 +252,7 @@ describe("thinking is boolean, and it is expressed in chat_template_kwargs", () 
   });
 
   test("off is never clamped upward into a thinking request", async () => {
-    // T1's trap: a null `off` is filtered out of the supported levels and then
+    // The trap this guards: a null `off` is filtered out of the supported levels and then
     // clamps *up* to the lowest level, silently billing thinking the user asked
     // to disable. `enable_thinking:false` on the wire is the proof it did not —
     // and note the flag is *present and false*, not merely absent, which is what
