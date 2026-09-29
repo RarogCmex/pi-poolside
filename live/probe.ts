@@ -21,26 +21,65 @@
  *
  *   node live/probe.ts <name>
  */
-import { mkdirSync, writeFileSync } from "node:fs";
-import { readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 const DEFAULT_BASE = "https://inference.poolside.ai/v1";
 
+/**
+ * Resolve the key and base URL. Precedence: the environment, then an optional
+ * local `secret.env`, then the credential `/login poolside` stored.
+ *
+ * The `secret.env` read is **optional and wrapped**: the file is gitignored, so
+ * on a fresh clone it does not exist. Reading it unconditionally first would make
+ * every `node live/probe.ts <name>` command in the README die with ENOENT before
+ * ever consulting the environment — which is what this used to do. `live/check.ts`
+ * resolves the same way.
+ */
 function loadEnv(): { key: string; base: string } {
-  const text = readFileSync(new URL("../secret.env", import.meta.url), "utf8");
   const env: Record<string, string> = {};
-  for (const line of text.split(/\r?\n/)) {
-    const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
-    if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+  const secretPath = new URL("../secret.env", import.meta.url);
+  if (existsSync(secretPath)) {
+    for (const line of readFileSync(secretPath, "utf8").split(/\r?\n/)) {
+      const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
+      if (m) env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+    }
   }
-  const key = process.env.POOLSIDE_API_KEY?.trim() || env.POOLSIDE_API_KEY?.trim();
+  const key =
+    process.env.POOLSIDE_API_KEY?.trim() ||
+    env.POOLSIDE_API_KEY?.trim() ||
+    storedKey();
   const base = (
     process.env.POOLSIDE_BASE_URL?.trim() ||
     env.POOLSIDE_BASE_URL?.trim() ||
     DEFAULT_BASE
   ).replace(/\/+$/, "");
-  if (!key) throw new Error("POOLSIDE_API_KEY missing");
+  if (!key) {
+    throw new Error(
+      "no poolside key found — export POOLSIDE_API_KEY=sky_… (or run `/login poolside` " +
+        "inside pi, or create a local gitignored secret.env with POOLSIDE_API_KEY=…)",
+    );
+  }
   return { key, base };
+}
+
+/** The credential `/login poolside` stored, or undefined. Never throws. */
+function storedKey(): string | undefined {
+  try {
+    const auth = JSON.parse(
+      readFileSync(`${homedir()}/.pi/agent/auth.json`, "utf8"),
+    ) as Record<string, { type?: string; key?: string }>;
+    return auth["poolside"]?.key?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -446,6 +485,24 @@ console.log(`\nledger: ${JSON.stringify(ledger)}`);
 process.exit(0);
 }
 
+/**
+ * True when this file is the entry point. `import.meta.main` where the runtime
+ * provides it, else the argv[1] comparison. The fallback matters: without it a
+ * Node that lacks the property makes every documented `node live/probe.ts <name>`
+ * command exit 0 having printed nothing, which is the worst failure mode for a
+ * harness whose entire output is evidence.
+ */
+function isEntryPoint(): boolean {
+  if (typeof import.meta.main === "boolean") return import.meta.main;
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return realpathSync(argv1) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
+  }
+}
+
 // Importable without side effects: the offline suite asserts `buildHeaders` really
 // omits the Authorization header, which is the bug that once produced a false fixture.
-if (import.meta.main) await main();
+if (isEntryPoint()) await main();
