@@ -1,7 +1,7 @@
 # pi-poolside
 
 A [pi](https://pi.dev) provider plugin for the **Poolside inference API**
-(`https://inference.poolside.ai/v1`).
+(`https://inference.poolside.ai/v1`). npm name: `@rarogcmex/pi-poolside`.
 
 It registers `poolside` as a first-class provider: the two Laguna ids from the
 gateway's own `/v1/models` listing with their advertised limits and zero prices,
@@ -11,13 +11,47 @@ agent turns, a live listing overlay, and an error layer for the three failure
 dialects this API actually produces — all measured, see
 [`research/2026-09-26-live-verification.md`](research/2026-09-26-live-verification.md).
 
-```
+```bash
 pi install git:github.com/RarogCmex/pi-poolside@main   # or a local checkout: pi install ./pi-poolside
-/login poolside            # or: export POOLSIDE_API_KEY=sky_…
+```
+
+Then, **inside pi** (its own slash command, not a shell command):
+
+```
+/login poolside
+```
+
+or set the key in the environment instead:
+
+```bash
+export POOLSIDE_API_KEY=sky_…
 ```
 
 `POOLSIDE_BASE_URL` overrides the endpoint (a mirror, or the self-managed
 `https://<model-hostname>/v1` endpoint the vendor's Pi page describes).
+
+## Usage
+
+Model ids take pi's `<provider>/<model-id>` form. Because the gateway's own ids
+already begin with `poolside/`, a fully qualified id here has the prefix twice —
+that is not a typo:
+
+```bash
+pi --model poolside/poolside/laguna-s-2.1 -p "hello"   # provider / gateway id
+pi --list-models poolside
+```
+
+Inside pi, `/model` lists both ids as `poolside/laguna-xs-2.1` and
+`poolside/laguna-s-2.1`; the doubled form is only what the command line needs.
+Thinking is a two-position switch here — `--thinking off` or `--thinking low`;
+the other five levels clamp down to `low` (see the trap below).
+
+> **Before you point an agent at this endpoint.** Every price in the listing is
+> the string `"0"` and both ids carry `is_free: true`, so pi reports `$0.00` and
+> that figure is the provider's own, not an estimate. What a zero price implies
+> about *data use* is not stated in the listing and was not verified for this
+> README. You are sending your prompts — and, in an agent session, your source
+> tree — to a third party; read Poolside's own terms before doing so.
 
 ## Models
 
@@ -82,9 +116,10 @@ The seven thinking levels pi knows therefore collapse to two here:
   `xhigh` and `max` are marked unsupported (`null` in `thinkingLevelMap`) and
   clamp **down** to `low`, so a request for `high` does not silently do nothing.
 
-`off` is *not* mapped to `null` — that is pitfall T1, where a null `off` is
-filtered out of the supported levels and then clamps upward into a thinking
-request the user explicitly disabled. Both branches are asserted on the wire for
+`off` is *not* mapped to `null`. A null `off` would be filtered out of the
+supported levels, and `off` would then clamp **upward** into a thinking request
+the user explicitly disabled — silently billing reasoning they asked to turn off.
+Both branches are asserted on the wire for
 the whole catalog × all seven levels in `test/wire-format.test.ts`.
 
 ## How the compat flags are set (and why each one)
@@ -107,8 +142,7 @@ Every flag is pinned explicitly:
 
 `test/wire-format.test.ts` asserts all of this on the bytes, and asserts the
 *absence* of `store`, `prompt_cache_retention`, `prompt_cache_key`,
-`reasoning_effort`, `reasoning`, `thinking`, `store`, `priority`, `top_p` and
-`top_k`.
+`reasoning_effort`, `reasoning`, `thinking`, `priority`, `top_p` and `top_k`.
 
 ## `reasoning_content` — sent because the provider requires it, and what that does *not* mean
 
@@ -134,6 +168,9 @@ observed. Details and the experiment that would settle it:
 ## Surfaces — three states
 
 Each row carries its own date and source, because they are not the same claim.
+The `research/raw/…` paths in the source column are the recorded response bodies;
+that directory is gitignored and **not published**. Every one of them is
+regenerable with `node live/probe.ts <name>`, which is the point of the column.
 
 ### 1. Checked and present
 
@@ -152,7 +189,7 @@ Each row carries its own date and source, because they are not the same claim.
 | `POST /v1/responses` | Same: 200 and functional, but the plugin's job is one working surface, and the thinking control documented for this provider is expressed in `chat_template_kwargs`, which belongs to the completions route. |
 | `POST /v1/embeddings` | **404 `Model not found`** for every model id in the listing (`research/raw/embeddings-surface.txt`); no embedding model is advertised. Not a surface to add at all. |
 | Poolside's own Pi page, `https://docs.poolside.ai/tools/pi.md` | This is the gap this plugin closes rather than a surface: the vendor's recommended setup is a hand-filled `~/.pi/agent/models.json` entry where *you* supply `reasoning`, `contextWindow` and `maxTokens`, with `"apiKey": "$POOLSIDE_API_KEY"` — the same env var this plugin uses, so both can coexist. It also documents a self-managed `https://<model-hostname>/v1` endpoint; this plugin points at the hosted endpoint by default and accepts `POOLSIDE_BASE_URL` for exactly that case (unprobed). |
-| Poolside ids already inside pi — under other providers | pi 0.87.1 ships `poolside/laguna-xs-2.1` under **`nvidia`** (`integrate.api.nvidia.com`, `maxTokens: 16384`, `maxTokensField: "max_tokens"`) and both ids under **`openrouter`** (including a `:free` variant with `thinkingFormat: "openrouter"`), plus `poolside/laguna-s-2.1` under **`vercel-ai-gateway`** (Anthropic Messages). A native provider is still worth it: the direct free endpoint, the listing's real 262 144 window instead of 16 384 output cap, `chat_template_kwargs` thinking control, `/login`, and error messages that name the actual failure. |
+| Poolside ids already inside pi — under other providers | pi 0.87.1 ships `poolside/laguna-xs-2.1` under **`nvidia`** (`integrate.api.nvidia.com`, `maxTokens: 16384`, `maxTokensField: "max_tokens"`) and both ids under **`openrouter`** (including a `:free` variant with `thinkingFormat: "openrouter"`), plus `poolside/laguna-s-2.1` under **`vercel-ai-gateway`** (Anthropic Messages). A native provider is still worth it: the direct free endpoint, the listing's real 32 768 output cap instead of nvidia's 16 384 (both routes carry the same 262 144 window), `chat_template_kwargs` thinking control, `/login`, and error messages that name the actual failure. |
 
 ### 3. Deliberately not investigated
 
@@ -176,53 +213,51 @@ Full detail with raw evidence: [`research/2026-09-26-live-verification.md`](rese
 | the empty body is rejected *before* auth, so it is not a key check | paired real/bogus-key requests | `node live/probe.ts badkey-empty-body` |
 | 502 HTML for an empty `Authorization` value | 4/4 deterministic | `node live/probe.ts listing-empty-auth` |
 | wrong key on `GET /models` loses the body to a stream reset | `curl` and undici both | `node live/probe.ts listing-badkey` |
-| thinking off/on via `chat_template_kwargs` | two tiny generations | `node live/check.ts` check E |
-| the outgoing bytes (`max_tokens`, `enable_thinking`, no `developer` role) | pi-ai's real adapter, payload captured before send (free) | `node live/check.ts` check D |
-| usage on every SSE chunk does not corrupt pi's totals | recorded stream replayed through pi's adapter | `node live/check.ts` check H |
-| a tool call comes back well formed | one 256-token request | `node live/check.ts` check G |
+| thinking off/on via `chat_template_kwargs` | two tiny generations | `npm run live` → check E |
+| the outgoing bytes (`max_tokens`, `enable_thinking`, no `developer` role) | pi-ai's real adapter, payload captured before send (free) | `npm run live` → check D |
+| usage on every SSE chunk does not corrupt pi's totals | recorded stream replayed through pi's adapter | `npm run live` → check H |
+| a tool call comes back well formed | one 256-token request | `npm run live` → check G |
 | `reasoning_content` on the second request in a **real** agent run | `before_provider_request` hook + session JSONL | `pi -e <wire-hook> -p --model poolside/poolside/laguna-s-2.1 "…bash tool…"` |
-| `/login`'s key check accepts a good key and rejects a bad one | 404 vs 403, both free | `node live/check.ts` check B |
+| `/login`'s key check accepts a good key and rejects a bad one | 404 vs 403, both free | `npm run live` → check B |
 | the error path in print mode | bogus key → one clarified line, exit 1 | `POOLSIDE_API_KEY=sky_bogus… pi -p …` |
 
-Run the whole harness with `npm run live` after `set -a; . ./secret.env; set +a`
-(or after `pi /login poolside`). It is paced 3 s apart, gated on a real key, and
-never part of `npm test`. Set `POOLSIDE_LIVE_SKIP_COSTLY=1` to stop after the
-free checks.
+`live/probe.ts` takes one named probe as its argument, so those rows are
+individually runnable. **`live/check.ts` has no per-check selector** — the
+"check E/D/H/G/B" rows above name the entry in its ledger, not an argument. It
+runs A–J in a fixed order, so `npm run live` runs everything including the costly
+generations; set `POOLSIDE_LIVE_SKIP_COSTLY=1` to stop after the free checks.
 
-## Cost log
+Run it with `POOLSIDE_API_KEY=sky_… npm run live`, or after `/login poolside`
+inside pi (the harness reads `~/.pi/agent/auth.json` as a fallback). No file is
+read and nothing needs sourcing. It is paced 3 s apart, gated on a real key, and
+never part of `npm test`.
+
+## What verifying this cost
 
 The key is free — the listing prices every field at `"0"` and sets
-`is_free: true` — so the honest ledger is **tokens**, not dollars: **$0.00** is
-spent, and it is the provider's own number rather than an estimate.
+`is_free: true` — so **$0.00** was spent, and that is the provider's own number
+rather than an estimate. The honest ledger is therefore tokens, and it is
+itemised per request in
+[`research/2026-09-26-live-verification.md`](research/2026-09-26-live-verification.md)
+§ "Cost" rather than repeated here.
 
-Every 2xx is itemised. Latest full harness run (22 requests):
+What bounds it, which is the part worth knowing before you run the harness
+yourself:
 
-| request | status | in | out | reasoning | cached |
-|---|---|---|---|---|---|
-| `GET /v1/models` | 200 | 0 | 0 | 0 | 0 |
-| nine pre-inference rejections (401/403/404/400 × the traps) | 400–404 | 0 | 0 | 0 | 0 |
-| `enable_thinking: false` | 200 | 46 | 1 | 0 | 32 |
-| `enable_thinking: true` | 200 | 46 | 16 | 16 | 32 |
-| 3 pairs, with `reasoning_content` | 200 | 90 each | 2/96/2 | 0/96/0 | 32/0/0 |
-| 3 pairs, without | 200 | 77 each | 2/96/2 | 0/96/0 | 32/0/32 |
-| tool round-trip | 200 | 153 | 32 | 0 | 16 |
-| SSE stream | 200 | 46 | 2 | 0 | 32 |
-| `/v1/messages`, `/v1/responses` | 200 | 14, 46 | 1, 1 | 0, 1 | 0, 32 |
-| `/v1/embeddings` | 404 | 0 | 0 | 0 | 0 |
-| **totals** | 13 × 2xx, 9 × free 4xx | **852** | **556** (515 reasoning) | | **336** |
+- every generative request uses `max_tokens ≤ 16`, except the tool round-trip
+  (256, so the model has room to emit a call) and the `reasoning_content` pairs
+  (96);
+- requests are paced 3 s apart, and the questions a **rejection** could answer
+  were answered by rejections, which cost nothing — 9 of the 22 requests in a
+  full run are free 4xx;
+- the reasoning-pair totals move between runs (a full run has totalled 180, 253
+  and 556 output tokens on the same 22-request shape) because the model decides
+  whether to think. That variance is a property of the model, not of the harness,
+  which is why the ledger prints per-request numbers instead of a single total.
 
-Re-running the harness gives different totals in the reasoning-pair rows and
-sometimes in `enable_thinking: true` (0 or 16 reasoning tokens): the model
-decides whether to think, so those cells are the model's choice rather than a
-fixed property of the request. Two earlier full runs totalled 180 and 253 output
-tokens with the same 22-request shape.
+Real `pi` runs (four print-mode runs and two two-turn agent runs) added a few
+hundred tokens on top; their prompt sizes are visible in the session JSONL.
 
-Bound: every generative request uses `max_tokens ≤ 16` except the tool
-round-trip (256) and the reasoning pairs (96); each request is paced 3 s apart;
-the rejections that cost nothing were used wherever a rejection could answer the
-question. Real `pi` runs (four print-mode runs and two two-turn agent runs) added
-a few hundred tokens on top, from prompts whose sizes are visible in the session
-JSONL.
 
 ## What remains unverified
 
@@ -273,7 +308,8 @@ discovery.ts   additive, unknowns-only /v1/models overlay
 errors.ts      three-dialect parsing, body recovery, clarifications
 test/          160 offline tests, incl. the wire-format matrix and recorded fixtures
 live/          check.ts (paced harness), probe.ts (one named probe at a time),
-               make-error-fixtures.ts (regenerates the committed fixtures)
+               make-error-fixtures.ts (regenerates two of the three fixtures)
+scripts/       link-pi.mjs — dev setup only, never loaded by pi
 ```
 
 ### Error layer, in two layers
@@ -288,7 +324,7 @@ sentences because both are invisible from pi's side.
 
 `turn_end` adds **one** persistent TUI note for the states a human must act on,
 and is gated on `ctx.hasUI` — an entry appended after the errored assistant
-message makes `pi -p` print nothing at all (pitfall P23). Verified: a bogus key
+message makes `pi -p` print nothing at all. Verified: a bogus key
 in print mode prints exactly one clarified line and exits 1.
 
 `withBodyRecovery` is installed because it was measured to help: the 502 proxy
@@ -314,14 +350,35 @@ corrections in the research log).
 
 ## Testing
 
-```
-npm run typecheck   # tsc against the installed pi types (see tsconfig.json for
-                    # the symlink recipe — node_modules is machine-specific)
-npm test            # 160 offline tests; test/no-network.ts preload makes any
-                    # accidental dial-out throw
-npm run live        # the paced live harness (needs a key; never part of npm test)
+```bash
+node scripts/link-pi.mjs   # once: link pi's packages from your global install
+npm run check              # typecheck + the 160 offline tests
+npm run live               # opt-in paced harness against the real gateway; needs a key
 ```
 
-`test/fixtures/*.json` are generated from the recorded raw responses by
-`node live/make-error-fixtures.ts` — never hand-transcribed, since a synthetic
-fixture hides exactly the shape that needed handling.
+Prerequisites: **Node ≥ 22.18** (the tests and both `live/` scripts are `.ts` run
+directly — type stripping and `node --test`'s `.ts` discovery are unflagged from
+22.18) and a pi install.
+
+pi's own packages are not dependencies of this plugin — at runtime pi's extension
+loader aliases the bare `@earendil-works/pi-ai` specifier to its own copy — so a
+plain `npm install` leaves nothing to typecheck against. `scripts/link-pi.mjs`
+links them from your global pi install; it probes the npm prefix, nvm, pnpm,
+`~/.local`, `/usr/local` and the directory the `pi` executable resolves to, and
+creates junctions on Windows. For a specific install:
+`PI_ROOT=/path/to/node_modules node scripts/link-pi.mjs`. Verified against
+pi-ai 0.87.1, whose internals the compat flags are pinned against.
+
+`test/no-network.ts` is preloaded into every `npm test` run and makes any
+accidental dial-out throw, so "offline" is a property of the suite rather than a
+claim about it.
+
+**Fixtures.** `test/fixtures/error-bodies.json` and `test/fixtures/streams.json`
+are generated from the recorded raw responses by `node live/make-error-fixtures.ts`
+— never hand-transcribed, since a synthetic fixture hides exactly the shape that
+needed handling. `test/fixtures/listing.json` has **no** generator: it was
+transcribed once from the recorded listing body, and `test/catalog.test.ts` fails
+if the catalog and the fixture ever disagree. Every generator input is read from
+gitignored `research/raw/`, so no committed fixture is reproducible from the
+published tree alone — `node live/probe.ts <name>` regenerates the recording
+first.

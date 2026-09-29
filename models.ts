@@ -11,16 +11,20 @@
  * |---|---|---|---|
  * | `maxTokensField` | `max_completion_tokens` | `max_tokens` | sending the listing's field name is rejected: `Extra inputs are not permitted` |
  * | `thinkingFormat` | `openai` (i.e. `reasoning_effort`) | `chat-template` | `reasoning_effort` has no effect; `chat_template_kwargs.enable_thinking` does |
- * | `requiresReasoningContentOnAssistantMessages` | `false` (true only for DeepSeek) | `true` | dropping `reasoning_content` made the *next* turn stop reasoning |
+ * | `requiresReasoningContentOnAssistantMessages` | `false` (true only for DeepSeek) | `true` | the provider documents the echo as required for agentic workflows, and a real agent run was captured sending it back. The *penalty* it warns about was NOT reproduced here — see README § `reasoning_content` |
  * | `supportsDeveloperRole` | `true` (and pi emits `developer` whenever `reasoning` is set) | `false` | no probe has ever seen this gateway accept `developer`; `system` works |
  *
  * `supportsReasoningEffort`, `supportsStore` and `supportsLongCacheRetention`
  * are pinned `false` because each one would otherwise put an unproven request
- * field on the wire for every single request.
+ * field on the wire for every single request. Three more are pinned `false`
+ * without a measurement behind them — `requiresToolResultName`,
+ * `requiresAssistantAfterToolResult` and `requiresThinkingAsText` — because the
+ * gateway is OpenAI-shaped and none of the three workarounds was ever needed in
+ * a probe; they are pinned so a pi default change cannot turn them on silently.
  */
 
 import type { Model, ModelCost, OpenAICompletionsCompat } from "@earendil-works/pi-ai";
-import { CATALOG, UNKNOWN_MODEL_FALLBACK, type CatalogEntry, type GatewayApi } from "./catalog.ts";
+import { CATALOG, type CatalogEntry, type GatewayApi } from "./catalog.ts";
 
 export type { GatewayApi } from "./catalog.ts";
 
@@ -82,9 +86,9 @@ export const MAX_TOKENS_FIELD: NonNullable<OpenAICompletionsCompat["maxTokensFie
  * `null`, which in pi's vocabulary means "this level does not exist" — the
  * picker hides it and `clampThinkingLevel` moves a request for `medium`,
  * `high`, `xhigh` or `max` *down* to `low`, which is the single "thinking on"
- * state this model has. `off` is deliberately **not** mapped to `null` (that
- * is the T1 trap: a null `off` is filtered out and `off` then clamps *upward*
- * to a reasoning level, silently billing thinking the user asked to disable).
+ * state this model has. `off` is deliberately **not** mapped to `null`: a null
+ * `off` is filtered out of the supported levels, and `off` then clamps *upward*
+ * to a reasoning level — silently billing thinking the user asked to disable.
  *
  * The wire expression is pure data, no hook:
  *
@@ -95,14 +99,15 @@ export const MAX_TOKENS_FIELD: NonNullable<OpenAICompletionsCompat["maxTokensFie
  *
  * pi-ai resolves `{$var: "thinking.enabled"}` to `!!reasoningEffort`, and
  * `streamSimple` sets `reasoningEffort = clampedReasoning === "off" ? undefined :
- * clampedReasoning` (`api/openai-completions.js:523-524`) — so `off` becomes the
+ * clampedReasoning` (in pi-ai's `api/openai-completions.js`; pi-ai is an unpinned
+ * peer, so cite the symbol rather than the offset) — so `off` becomes the
  * literal `false` and any other level becomes `true`. Both branches are asserted
  * byte-for-byte in `test/wire-format.test.ts` across the whole catalog and all
  * seven levels.
  *
  * `low` carries an explicit string so the map is complete for the levels pi can
- * still reach (pitfall T3: an *omitted* entry keeps a level supported and falls
- * back to pi's internal name); the `chat-template` branch never sends it, but a
+ * still reach — an *omitted* entry keeps the level supported and falls back to
+ * pi's internal name; the `chat-template` branch never sends it, but a
  * future change of `thinkingFormat` cannot silently leak `"medium"` onto the
  * wire.
  */
@@ -152,8 +157,9 @@ export const CHAT_COMPAT: OpenAICompletionsCompat = {
   // .cached_tokens`, measured 32/46 on a repeated prompt) but documents no
   // retention control, so no retention field is sent.
   supportsLongCacheRetention: false,
-  // pi 0.87 already defaults this false for unknown OpenAI-compatible hosts
-  // (#9816); pinned so a pi change cannot start sending strict tool schemas here.
+  // pi 0.87 already defaults this false for an OpenAI-compatible host it does
+  // not recognise; pinned explicitly so a pi default change cannot start sending
+  // strict tool schemas here.
   supportsStrictMode: false,
   // Measured: usage arrives in the stream (and even without `stream_options`).
   supportsUsageInStreaming: true,

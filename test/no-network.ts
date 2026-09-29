@@ -7,8 +7,8 @@
  *  1. has `globalThis.fetch` replaced with a throwing stub — a test that
  *     accidentally dials `inference.poolside.ai` fails loudly instead of
  *     spending the account's free quota, which makes "offline tests" a property
- *     of the suite rather than a claim about it (pitfalls L18/L35: a probe you
- *     *think* is free is not free until it comes back rejected);
+ *     of the suite rather than a claim about it. A probe you *think* is free is
+ *     not free until it comes back rejected;
  *  2. resolves the bare "@earendil-works/pi-ai" specifier to pi-ai's `compat`
  *     entrypoint, exactly as pi's extension loader does. Plain Node resolves it
  *     to `dist/index`, which does not export `openAICompletionsApi`, so without

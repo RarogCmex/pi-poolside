@@ -1,8 +1,10 @@
 /**
  * Catalog invariants, checked against the **recorded listing** rather than
- * against a hand-written expectation: `test/fixtures/listing.json` is generated
- * from `research/raw/listing.txt` by `live/make-error-fixtures.ts`, so the frozen
- * numbers in `catalog.ts` can only drift from the measurement by failing here.
+ * against a hand-written expectation. `test/fixtures/listing.json` was
+ * transcribed once from the recorded `GET /v1/models` body and has no generator
+ * (`live/make-error-fixtures.ts` writes only `error-bodies.json` and
+ * `streams.json`), so the frozen numbers in `catalog.ts` can only drift from the
+ * recording by failing here.
  */
 
 import assert from "node:assert/strict";
@@ -26,7 +28,11 @@ describe("frozen listing snapshot", () => {
   test("the listing carried exactly the two ids the catalog declares", () => {
     const listed = listing.data.map((m) => m.id);
     assert.deepEqual(listed, CATALOG.map((entry) => entry.id));
-    assert.equal(CATALOG.length, 2, "the catalog is thin on purpose — do not pad it");
+    assert.equal(
+      CATALOG.length,
+      2,
+      "the catalog mirrors the recorded listing — a new id needs a new recording",
+    );
   });
 
   test("every catalog number equals the listing's own value", () => {

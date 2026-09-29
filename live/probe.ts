@@ -5,8 +5,8 @@
  * `research/raw/<name>.txt` and prints one ledger row per HTTP attempt.
  *
  * Two rules this harness exists to enforce, both learned the hard way in this
- * repo (pitfalls L1 "the probe measures the harness", L35 "the probe you were
- * sure was free was billed"):
+ * repo — **a probe can measure the harness instead of the provider**, and **a
+ * probe you were sure was free is not free until it comes back rejected**:
  *
  *  1. **"No Authorization header" means the header is absent**, not present with
  *     an empty value and not silently replaced by the default key. An earlier

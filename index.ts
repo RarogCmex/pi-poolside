@@ -52,7 +52,8 @@ export default function (pi: ExtensionAPI) {
   // A persistent TUI note for the states the user has to fix (no key at all,
   // wrong key, unknown model). The `ctx.hasUI` gate is load-bearing: an entry
   // appended *after* the errored assistant message makes `pi -p` print nothing
-  // at all (pitfall P23), so print mode keeps only the rewritten error bubble.
+  // `pi -p` print nothing at all, so print mode keeps only the rewritten error
+  // bubble.
   // Deduped via customType because `turn_end` can re-fire.
   pi.on("turn_end", (event, ctx) => {
     if (!ctx.hasUI) return;

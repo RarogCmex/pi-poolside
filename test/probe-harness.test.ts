@@ -3,13 +3,13 @@
  *
  * An earlier version of `live/probe.ts` collapsed `auth: null` into `undefined`
  * and quietly substituted the real key, so `GET /models` "answered 200 without
- * authorization" and a false fixture was written to `research/raw/`. That is
- * pitfall L1 in its purest form: the probe measured the harness, not the
- * provider. `buildHeaders` is exported and asserted here so the mistake cannot
- * come back, and so the fixture generated from it means what it says.
+ * authorization" and a false fixture was written to `research/raw/`: the probe
+ * measured the harness, not the provider. `buildHeaders` is exported and asserted
+ * here so the mistake cannot come back, and so the fixture generated from it
+ * means what it says.
  *
- * The harness is also asserted to be import-safe: a test that imports it must
- * not source `secret.env`, create directories, or touch the network.
+ * The harness is also asserted to be import-safe: a test that imports it must not
+ * require a local key file, create directories, or touch the network.
  */
 
 import assert from "node:assert/strict";

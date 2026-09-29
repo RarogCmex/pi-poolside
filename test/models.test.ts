@@ -112,11 +112,11 @@ describe("thinking levels offered to the user", () => {
       assert.equal(map[THINKING_ON_LEVEL], THINKING_ON_LEVEL);
       // Every level the model cannot express is an explicit null (hidden and
       // clamped), never merely omitted — an omitted entry stays supported and
-      // would fall back to pi's own level name (pitfall T3).
+      // would fall back to pi's own level name.
       for (const absent of ["minimal", "medium", "high", "xhigh", "max"] as const) {
         assert.equal(map[absent], null, `${absent} must be an explicit null`);
       }
-      // `off` is deliberately NOT null: that is the T1 trap, where off clamps
+      // `off` is deliberately NOT null: a null off is filtered out, so off clamps
       // upward and thinking gets billed after the user disabled it.
       assert.notEqual(map.off, null);
     }

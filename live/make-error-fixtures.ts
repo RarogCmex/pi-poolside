@@ -2,11 +2,13 @@
  * Build `test/fixtures/error-bodies.json` from the recorded raw responses in
  * `research/raw/`, verbatim.
  *
- * The fixture is *generated* from recorded bytes rather than transcribed by
+ * The fixtures are *generated* from recorded bytes rather than transcribed by
  * hand: a hand-copied error body is how a synthetic fixture silently replaces
- * the shape that actually needed handling (pitfall: "generate data files, never
- * blind-replace"). This script is not part of the plugin; re-run it after a new
- * probe to refresh the fixture.
+ * the shape that actually needed handling. Generate data files; never
+ * blind-replace them. This script is not part of the plugin; re-run it after a
+ * new probe to refresh the fixtures. It writes `error-bodies.json` and
+ * `streams.json` only — `test/fixtures/listing.json` has no generator and was
+ * transcribed once from the recorded listing body.
  *
  *   node live/make-error-fixtures.ts
  */

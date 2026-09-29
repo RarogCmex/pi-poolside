@@ -2,27 +2,33 @@
  * Hygiene guards: no credential may reach the working tree, and the live harness
  * must not be able to run by accident.
  *
- * `secret.env` is gitignored from the first commit, but a key pasted into a
- * README example or a recorded body is the documented way this repo has leaked
- * secrets before (twice into READMEs, once into a commit), so the tree is
- * scanned rather than assumed.
+ * No key file is committed, but a key pasted into a README example, a recorded
+ * response body or a fixture is easy to miss by eye — so the tree is scanned
+ * rather than assumed. The walk covers everything that gets published,
+ * `research/*.md` included: `research/` is the one directory a partial scan tends
+ * to skip, and skipping it makes the "raw captures are not in the tree"
+ * assertion below vacuously true.
+ *
+ * `research/raw/` is excluded by path, not by name: it is gitignored, holds
+ * verbatim gateway bodies, and does not exist in a fresh clone.
  */
 
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import test, { describe } from "node:test";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-/** Directories that hold no source of ours. */
-const SKIP = new Set(["node_modules", ".git", "research"]);
+/** Directories that hold no published source of ours, by relative path. */
+const SKIP_DIRS = new Set(["node_modules", ".git", join("research", "raw")]);
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
-    if (SKIP.has(entry)) continue;
     const path = join(dir, entry);
+    const rel = relative(ROOT, path);
+    if (SKIP_DIRS.has(rel) || SKIP_DIRS.has(entry)) continue;
     if (statSync(path).isDirectory()) walk(path, out);
     else out.push(path);
   }
@@ -30,6 +36,9 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 const FILES = walk(ROOT);
+
+/** Guard against the scan silently degrading to nothing (see the header). */
+const SCANNED = FILES.map((path) => relative(ROOT, path).split(sep).join("/"));
 
 describe("no secret in the working tree", () => {
   test("no file contains a Poolside key literal", () => {
@@ -81,8 +90,17 @@ describe("no secret in the working tree", () => {
 
   test("the recorded raw responses are not part of the published tree", () => {
     // `research/raw/` holds verbatim gateway responses; they are inputs to the
-    // fixture generator, not deliverables.
-    assert.ok(!FILES.some((path) => path.includes("research/raw")), "raw probes leaked into the tree");
+    // fixture generator, not deliverables. This assertion is only meaningful
+    // because the walk above scans `research/` and excludes `raw/` by path —
+    // so first prove the walk really reached the published research notes.
+    assert.ok(
+      SCANNED.some((path) => path === "research/2026-09-26-live-verification.md"),
+      "the scan did not reach research/*.md — the raw-capture check below is vacuous",
+    );
+    assert.ok(
+      !SCANNED.some((path) => path.startsWith("research/raw/")),
+      "raw probes leaked into the tree",
+    );
   });
 
   test("the committed fixtures are the generated ones, not the raw captures", () => {

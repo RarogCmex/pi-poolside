@@ -43,10 +43,12 @@ import { PROVIDER_ID } from "./models.ts";
 const SENTINEL = "poolside:";
 
 /**
- * No key-management URL is printed anywhere in this plugin: the console address
- * in the docs (`platform.poolside.ai`, the page the key is created on) was read
- * but never fetched, and a wrong URL in an auth error is worse than none. The
- * measured 401 body names nothing but the header.
+ * No key-management URL is printed in this plugin's *error messages*: the console
+ * address in the docs (`platform.poolside.ai`, the page the key is created on) was
+ * read but never fetched, and a wrong URL in an auth error is worse than none.
+ * The measured 401 body names nothing but the header. (`provider.ts` does print
+ * the address in the interactive `/login` prompt, where the user can act on it and
+ * a wrong value is visible rather than buried in a failure.)
  */
 export const AUTH_HELP = `run \`/login ${PROVIDER_ID}\` or set \`POOLSIDE_API_KEY\``;
 

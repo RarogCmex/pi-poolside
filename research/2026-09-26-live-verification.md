@@ -1,13 +1,15 @@
 # Poolside provider — live verification log (2026-09-26)
 
 Everything below was measured against `https://inference.poolside.ai/v1` on
-2026-09-26 with the free key from `secret.env`, by this build, unless a line says
-otherwise. Raw bodies for the free probes are in `research/raw/` (gitignored;
-regenerate with `node live/probe.ts <name>`), and the committed fixtures are
-generated from them by `live/make-error-fixtures.ts`.
+2026-09-26 with a real key, unless a line says otherwise. Raw bodies for the free
+probes are in `research/raw/` (gitignored, so not published — regenerate any of
+them with `node live/probe.ts <name>`). Two committed fixtures are generated from
+those recordings by `live/make-error-fixtures.ts`: `test/fixtures/error-bodies.json`
+and `test/fixtures/streams.json`. `test/fixtures/listing.json` has no generator —
+it was transcribed once from the recorded listing body.
 
 An earlier reconnaissance pass was **not** re-measured as a whole. Where this
-build checked one of its claims and got a different answer, the difference is
+pass checked one of its claims and got a different answer, the difference is
 recorded under "Where the recon was wrong" at the end.
 
 ## Cost
@@ -15,7 +17,7 @@ recorded under "Where the recon was wrong" at the end.
 The key is free: the listing prices every field of both models at the string
 `"0"` and sets `is_free: true`. Money spent: **$0.00**. What is itemised instead
 is tokens, per request, including the requests that were expected to be free —
-a 2xx is a billed call whatever the prediction was (pitfalls L35).
+a 2xx is a billed call whatever the prediction was.
 
 Third full harness run (`npm run live`, 22 requests):
 

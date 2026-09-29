@@ -1,7 +1,10 @@
 /**
  * Live checks against the real Poolside inference API — the claims the offline
  * suite cannot verify (README § "What is verified live, and how"). Not part of
- * `npm test`: run explicitly with `npm run live` after `set -a; . ./secret.env`.
+ * `npm test`: run explicitly with `npm run live`. Needs a key from
+ * `POOLSIDE_API_KEY` or from the credential `/login poolside` stored; no file is
+ * read. Checks run in a fixed order — there is no per-check selector, so use
+ * `POOLSIDE_LIVE_SKIP_COSTLY=1` to stop after the free ones.
  *
  * **Accounting.** The key is free (the listing says `is_free: true` and prices
  * every field at `"0"`), so no USD figure is printed anywhere — the ledger is
@@ -69,8 +72,8 @@ function loadKey(): string {
   const key = auth["poolside"]?.key?.trim();
   if (!key) {
     throw new Error(
-      "no poolside key in POOLSIDE_API_KEY or ~/.pi/agent/auth.json — " +
-        "run `set -a; . ./secret.env; set +a` first",
+      "no poolside key found — export POOLSIDE_API_KEY=sky_… or run " +
+        "`/login poolside` inside pi first",
     );
   }
   return key;
@@ -121,7 +124,7 @@ interface RawResult {
 
 /**
  * One paced request. Every attempt is ledgered, including the ones expected to be
- * free — a 200 is a billed 2xx whatever we predicted (pitfalls L35).
+ * free — a 200 is a billed 2xx whatever we predicted.
  */
 async function raw(
   check: string,
@@ -443,11 +446,11 @@ if (SKIP_COSTLY) {
   // --- F. the paired reasoning-echo experiment --------------------------------
   //
   // The vendor documents an *effect*: "dropping previous reasoning content can
-  // prevent the model from reasoning in later steps". This build ran the paired
+  // prevent the model from reasoning in later steps". The 2026-09-26 pass ran the paired
   // experiment and **could not reproduce it**: two rounds of the same pair gave
   // opposite answers, so what is asserted here is the reproducible half — the
   // echoed form is accepted and works — and the numbers are printed rather than
-  // summarised into a claim the evidence does not support (pitfalls L3).
+  // summarised into a claim the evidence does not support.
   const PAIRS = 3;
   const echoedArm: number[] = [];
   const silentArm: number[] = [];
