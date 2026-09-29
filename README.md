@@ -265,9 +265,10 @@ Each line says how to check it — no untested claim is dressed up as a tested o
 
 - **The context-overflow wording.** Nothing was ever sent over the window (that
   is the one probe that costs real tokens if it is accepted instead of rejected).
-  pi 0.87.1 already ships a Poolside-flavoured pattern
-  (`pi-ai/dist/utils/overflow.js:56`, `/exceeds maximum allowed input length of N
-  tokens/`), so compaction may already work; this plugin adds no overflow rewrite
+  pi 0.87.1 already ships a Poolside-flavoured pattern in its overflow list
+  (`/exceeds maximum allowed input length of N tokens/`, in pi-ai's
+  `utils/overflow.js`), so compaction may already work; this plugin adds no
+  overflow rewrite
   because none was measured. *Check:* send ~10× 262 144 tokens in one message and
   read the 4xx; if a 200 comes back it was billed.
 - **429 / rate-limit behaviour.** No 429 was observed in any run, so no 429
@@ -341,7 +342,8 @@ corrections in the research log).
   `chatTemplateKwargs`), which is testable on the wire without a hook. A
   `before_provider_request` hook exists only inside the test harness.
 - **No streaming `usage` workaround.** pi already assigns per chunk
-  (`openai-completions.js:362`), which is correct for this gateway's cumulative
+  (pi-ai assigns `output.usage` per chunk in `openai-completions.js`), which is
+  correct for this gateway's cumulative
   usage; the plugin leaves pi's accounting alone and pins the behaviour in a test.
 - **No second api surface, no `filterModels`, no account gating.** Everything the
   listing offers is free, so there is nothing to gate.

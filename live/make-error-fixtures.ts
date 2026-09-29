@@ -156,7 +156,8 @@ console.log(`wrote test/fixtures/error-bodies.json with ${Object.keys(fixtures).
  * `usage`**, and the final chunk sometimes repeats the total and sometimes
  * carries `usage: null` (`research/raw/stream-usage.txt` vs
  * `stream-usage-no-option.txt`). pi-ai *assigns* per chunk instead of
- * accumulating (`api/openai-completions.js:362-363`), which is only correct for
+ * accumulating (it assigns `output.usage = parseChunkUsage(...)` per chunk in
+ * `api/openai-completions.js`), which is only correct for
  * a cumulative stream — `test/usage.test.ts` pins that.
  */
 const STREAMS: Record<string, { file: string; case: string }> = {

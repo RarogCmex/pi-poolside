@@ -9,7 +9,8 @@
  * from `research/raw/*.txt`.
  *
  * pi-ai *assigns* each chunk's usage instead of accumulating
- * (`api/openai-completions.js:362-363`: `output.usage = parseChunkUsage(...)`),
+ * (`output.usage = parseChunkUsage(...)` per chunk, in pi-ai's
+ * `api/openai-completions.js`),
  * which is correct for a cumulative stream and wrong for a delta stream. These
  * tests pin the outcome for the recorded bytes, so a provider-side switch to
  * delta usage — or a pi-side switch to accumulation — fails here instead of

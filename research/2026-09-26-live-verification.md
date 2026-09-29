@@ -208,7 +208,8 @@ Every content chunk carries a **cumulative** `usage` (and with
 gateway's own docs confirm it: *"Poolside-hosted inference includes a running
 token usage total on every chunk and the completed total on the final chunk.
 Setting `stream_options.include_usage` to `false` does not suppress these
-totals."* pi-ai assigns rather than accumulates (`openai-completions.js:362`), so
+totals."* pi-ai assigns rather than accumulates (`output.usage =
+parseChunkUsage(...)` per chunk, in `openai-completions.js`), so
 the last cumulative value wins — asserted with the recorded streams in
 `test/usage.test.ts` and reproduced live in `live/check.ts` check H.
 
@@ -275,7 +276,8 @@ under `nvidia`/`openrouter`.
 - **Any context-overflow rejection.** No oversized prompt was ever sent (that is
   the one probe that costs real money when it is *accepted*). pi 0.87.1 already
   ships a Poolside-flavoured overflow pattern
-  (`utils/overflow.js:56`, `/exceeds maximum allowed input length of N tokens/`),
+  (the pattern `/exceeds maximum allowed input length of N tokens/` in pi-ai's
+  `utils/overflow.js`),
   so if that is the wording, compaction fires with no help from this plugin — but
   the wording is unverified. The probe: send a body ~10× over 262144 tokens and
   read the rejection; it must come back 4xx, or it was billed. There is no

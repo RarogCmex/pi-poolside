@@ -57,7 +57,7 @@ describe("entryToModel", () => {
 
   test("reasoning is true, and that is load-bearing in pi", () => {
     // `chat_template_kwargs` and `reasoning_content` are only applied when
-    // `model.reasoning` is set (pi-ai 0.87.1 `openai-completions.js:645`,
+    // `model.reasoning` is set (pi-ai 0.87.1, `openai-completions.js`,
     // `:1044`), so this flag is not cosmetic — with `reasoning: false` the
     // thinking switch and the reasoning echo would both silently vanish.
     for (const entry of CATALOG) {

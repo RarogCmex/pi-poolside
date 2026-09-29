@@ -449,7 +449,7 @@ describe("negative safety against pi's real classifiers", () => {
   test("the classifiers can see an overflow when one is actually present", () => {
     // A control: without it, "no recorded body is an overflow" could be true
     // because the classifier never fires at all. pi 0.87.1 already ships a
-    // Poolside-flavoured pattern (`utils/overflow.js:56`,
+    // Poolside-flavoured pattern (in pi-ai's `utils/overflow.js`,
     // `/exceeds maximum allowed input length of N tokens/`, contributed for the
     // OpenRouter route), so compaction would fire on that wording without any
     // rewrite from this plugin.

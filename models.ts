@@ -37,7 +37,8 @@ export const DEFAULT_BASE_URL = "https://inference.poolside.ai/v1";
  * `GET /v1/models` names the cap `max_completion_tokens`, and pi-ai's
  * auto-detection would agree with the listing (`detectCompat` returns
  * `max_completion_tokens` for any host that is not chutes/DeepSeek/Moonshot/
- * Cloudflare/Together — `api/openai-completions.js:1246-1252`). Both are wrong
+ * Cloudflare/Together — in the URL auto-detection branch of pi-ai's
+ * `api/openai-completions.js`). Both are wrong
  * for *this* API: the listing's field name is not a request field.
  *
  * Measured (`research/raw/max-completion-tokens-field.txt`), free because it is

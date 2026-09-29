@@ -17,8 +17,11 @@
  *  - `supported_features: ["tools", "reasoning"]` is what makes `reasoning` true
  *    below — and `reasoning` is load-bearing for `thinkingFormat:
  *    "chat-template"` and `requiresReasoningContentOnAssistantMessages`, both of
- *    which pi only applies when `model.reasoning` is set
- *    (`api/openai-completions.js:645-650`, `:1044-1047` in pi-ai 0.87.1).
+ *    which pi only applies when `model.reasoning` is set — verified in pi-ai
+ *    0.87.1's `api/openai-completions.js`, both where `chat_template_kwargs` is
+ *    built and where the compat block is resolved. Module and behaviour are named
+ *    rather than line offsets: pi-ai is an optional peer pinned to `*`, so an
+ *    offset rots silently on the next release.
  *
  * Prices are zero because the provider says so (`pricing: {"prompt": "0",
  * "completion": "0", …}`), not because a price is unknown — the one case where
