@@ -369,7 +369,9 @@ links them from your global pi install; it probes the npm prefix, nvm, pnpm,
 `~/.local`, `/usr/local` and the directory the `pi` executable resolves to, and
 creates junctions on Windows. For a specific install:
 `PI_ROOT=/path/to/node_modules node scripts/link-pi.mjs`. Verified against
-pi-ai 0.87.1, whose internals the compat flags are pinned against.
+pi-ai 0.87.1, whose internals the compat flags are pinned against; the suite was
+re-run green on pi-ai 0.99.1 (2026-09-30, 160/160). The flags stay pinned on
+purpose, so a pi-side change cannot start sending different wire fields here.
 
 `test/no-network.ts` is preloaded into every `npm test` run and makes any
 accidental dial-out throw, so "offline" is a property of the suite rather than a
