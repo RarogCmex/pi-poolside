@@ -374,6 +374,11 @@ pi-ai 0.87.1, whose internals the compat flags are pinned against; the suite was
 re-run green on pi-ai 0.99.1 (2026-09-30, 160/160). The flags stay pinned on
 purpose, so a pi-side change cannot start sending different wire fields here.
 
+`npm run typecheck` shells out to a bare `tsc`, and this repo deliberately carries
+no devDependencies (`scripts/link-pi.mjs` links only pi's packages), so TypeScript
+must be on your `PATH`: `npm i -g typescript@5.9.3` — the version CI pins
+(`.github/workflows/check.yml`); 7.0.2 also typechecks clean (measured 2026-09-30).
+
 `test/no-network.ts` is preloaded into every `npm test` run and makes any
 accidental dial-out throw, so "offline" is a property of the suite rather than a
 claim about it.
