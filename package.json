@@ -1,6 +1,6 @@
 {
   "name": "@rarogcmex/pi-poolside",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Poolside inference provider for pi — the two Laguna ids from the /v1/models listing (sourced context_length/max_completion_tokens/supported_features, zero prices), boolean thinking via chat_template_kwargs.enable_thinking, reasoning_content echo on assistant messages, /login, an additive listing overlay and an error layer for the gateway's three failure dialects.",
   "type": "module",
   "license": "MIT",
