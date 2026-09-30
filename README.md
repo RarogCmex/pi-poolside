@@ -228,7 +228,8 @@ runs A–J in a fixed order, so `npm run live` runs everything including the cos
 generations; set `POOLSIDE_LIVE_SKIP_COSTLY=1` to stop after the free checks.
 
 Run it with `POOLSIDE_API_KEY=sky_… npm run live`, or after `/login poolside`
-inside pi (the harness reads `~/.pi/agent/auth.json` as a fallback). No file is
+inside pi (the harness reads `auth.json` in pi's agent dir as a fallback —
+`$PI_CODING_AGENT_DIR` when set, else `~/.pi/agent`). No file is
 read and nothing needs sourcing. It is paced 3 s apart, gated on a real key, and
 never part of `npm test`.
 

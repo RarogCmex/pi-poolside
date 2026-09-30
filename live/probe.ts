@@ -28,10 +28,18 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_BASE = "https://inference.poolside.ai/v1";
+
+/**
+ * pi's own agent-dir resolver, so `$PI_CODING_AGENT_DIR` and rebranded
+ * distributions are honoured instead of a hardcoded `~/.pi/agent`. Same class as
+ * the pi-nvidia-plus store fix (2026-09-30); `live/check.ts` resolves the same way.
+ */
+const authJsonPath = (): string => join(getAgentDir(), "auth.json");
 
 /**
  * Resolve the key and base URL. Precedence: the environment, then an optional
@@ -74,7 +82,7 @@ function loadEnv(): { key: string; base: string } {
 function storedKey(): string | undefined {
   try {
     const auth = JSON.parse(
-      readFileSync(`${homedir()}/.pi/agent/auth.json`, "utf8"),
+      readFileSync(authJsonPath(), "utf8"),
     ) as Record<string, { type?: string; key?: string }>;
     return auth["poolside"]?.key?.trim() || undefined;
   } catch {

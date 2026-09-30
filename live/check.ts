@@ -45,7 +45,8 @@
  */
 
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import {
   isContextOverflow,
@@ -63,9 +64,17 @@ import { probeKey } from "../provider.ts";
 
 // --- key + base url ----------------------------------------------------------
 
+/**
+ * pi's own agent-dir resolver, so `$PI_CODING_AGENT_DIR` and rebranded
+ * distributions are honoured: a hardcoded `~/.pi/agent/auth.json` misses a pi
+ * started with an alternate config dir, which is where `/login poolside` stored
+ * the credential. Same class as the pi-nvidia-plus store fix (2026-09-30).
+ */
+const authJsonPath = (): string => join(getAgentDir(), "auth.json");
+
 function loadKey(): string {
   if (process.env.POOLSIDE_API_KEY?.trim()) return process.env.POOLSIDE_API_KEY.trim();
-  const auth = JSON.parse(readFileSync(`${homedir()}/.pi/agent/auth.json`, "utf8")) as Record<
+  const auth = JSON.parse(readFileSync(authJsonPath(), "utf8")) as Record<
     string,
     { type?: string; key?: string }
   >;
@@ -73,7 +82,7 @@ function loadKey(): string {
   if (!key) {
     throw new Error(
       "no poolside key found — export POOLSIDE_API_KEY=sky_… or run " +
-        "`/login poolside` inside pi first",
+        `\`/login poolside\` inside pi first (looked in ${authJsonPath()})`,
     );
   }
   return key;
