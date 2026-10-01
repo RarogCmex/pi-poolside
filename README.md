@@ -213,19 +213,34 @@ Full detail with raw evidence: [`research/2026-09-26-live-verification.md`](rese
 | the empty body is rejected *before* auth, so it is not a key check | paired real/bogus-key requests | `node live/probe.ts badkey-empty-body` |
 | 502 HTML for an empty `Authorization` value | 4/4 deterministic | `node live/probe.ts listing-empty-auth` |
 | wrong key on `GET /models` loses the body to a stream reset | `curl` and undici both | `node live/probe.ts listing-badkey` |
-| thinking off/on via `chat_template_kwargs` | two tiny generations | `npm run live` → check E |
-| the outgoing bytes (`max_tokens`, `enable_thinking`, no `developer` role) | pi-ai's real adapter, payload captured before send (free) | `npm run live` → check D |
-| usage on every SSE chunk does not corrupt pi's totals | recorded stream replayed through pi's adapter | `npm run live` → check H |
-| a tool call comes back well formed | one 256-token request | `npm run live` → check G |
+| thinking off/on via `chat_template_kwargs` | two tiny generations | `npm run live -- E` |
+| the outgoing bytes (`max_tokens`, `enable_thinking`, no `developer` role) | pi-ai's real adapter, payload captured before send (free) | `npm run live -- D` |
+| usage on every SSE chunk does not corrupt pi's totals | recorded stream replayed through pi's adapter | `npm run live -- H` |
+| a tool call comes back well formed | one 256-token request | `npm run live -- G` |
 | `reasoning_content` on the second request in a **real** agent run | `before_provider_request` hook + session JSONL | `pi -e <wire-hook> -p --model poolside/poolside/laguna-s-2.1 "…bash tool…"` |
-| `/login`'s key check accepts a good key and rejects a bad one | 404 vs 403, both free | `npm run live` → check B |
+| `/login`'s key check accepts a good key and rejects a bad one | 404 vs 403, both free | `npm run live -- B` |
 | the error path in print mode | bogus key → one clarified line, exit 1 | `POOLSIDE_API_KEY=sky_bogus… pi -p …` |
 
 `live/probe.ts` takes one named probe as its argument, so those rows are
-individually runnable. **`live/check.ts` has no per-check selector** — the
-"check E/D/H/G/B" rows above name the entry in its ledger, not an argument. It
-runs A–J in a fixed order, so `npm run live` runs everything including the costly
-generations; set `POOLSIDE_LIVE_SKIP_COSTLY=1` to stop after the free checks.
+individually runnable — and since 2026-10-01 `live/check.ts` does too:
+
+```bash
+npm run live -- --list        # what the checks are, which cost tokens, what needs what
+npm run live -- E             # just E
+npm run live -- tools usage   # title substrings → G and H
+npm run live -- --free        # A–D and I: nothing the gateway answers with tokens
+```
+
+A filter is a check id, or a title substring of three or more characters (so `a`
+means check A, not every title containing the letter); a filter that matches
+nothing exits 2 rather than quietly running nothing, because "0 of 10 checks" must
+not look like a pass. A check that consumes another check's measurements declares
+it: `I` classifies the error bodies that `B`'s free probes collected, so
+`npm run live -- I` runs B too and prints that it did. The selector lives in
+`live/select.ts` as a pure module with its own offline tests
+(`test/select.test.ts`), and the harness prints the selection before the run and
+again in the summary, so a partial log can never be mistaken for a full pass.
+`POOLSIDE_LIVE_SKIP_COSTLY=1` still works and means the same as `--free`.
 
 Run it with `POOLSIDE_API_KEY=sky_… npm run live`, or after `/login poolside`
 inside pi (the harness reads `auth.json` in pi's agent dir as a fallback —
@@ -355,8 +370,10 @@ corrections in the research log).
 
 ```bash
 node scripts/link-pi.mjs   # once: link pi's packages from your global install
-npm run check              # typecheck + the 160 offline tests
+npm run check              # typecheck + the 178 offline tests
 npm run live               # opt-in paced harness against the real gateway; needs a key
+npm run live -- --list     # …or just show its checks — no key, no requests
+npm run live -- E G        # …or run a subset (ids or title substrings)
 ```
 
 Prerequisites: **Node ≥ 22.18** (the tests and both `live/` scripts are `.ts` run
