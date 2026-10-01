@@ -3,8 +3,10 @@
  * suite cannot verify (README § "What is verified live, and how"). Not part of
  * `npm test`: run explicitly with `npm run live`. Needs a key from
  * `POOLSIDE_API_KEY` or from the credential `/login poolside` stored; no file is
- * read. Checks run in a fixed order — there is no per-check selector, so use
- * `POOLSIDE_LIVE_SKIP_COSTLY=1` to stop after the free ones.
+ * read. Checks run in a fixed order; `npm run live -- --list` prints them and
+ * `npm run live -- A D` (or `-- tools`, a title substring) runs a subset. The
+ * selector itself is pure and unit-tested offline in `test/select.test.ts`.
+ * `POOLSIDE_LIVE_SKIP_COSTLY=1` still works and means the same as `--free`.
  *
  * **Accounting.** The key is free (the listing says `is_free: true` and prices
  * every field at `"0"`), so no USD figure is printed anywhere — the ledger is
@@ -42,6 +44,9 @@
  *                          of the README table). Two requests, `max_tokens: 1`.
  *
  * Set `POOLSIDE_LIVE_SKIP_COSTLY=1` to stop after the free checks (A–D, I).
+ *
+ * A selection is reported before the run and again in the summary, so a log can
+ * never be mistaken for a full pass; a filter that matches nothing exits 2.
  */
 
 import { readFileSync } from "node:fs";
@@ -61,6 +66,7 @@ import { CATALOG, CATALOG_BY_ID } from "../catalog.ts";
 import { clarifyPoolsideError, parseGatewayError, withBodyRecoveryApi } from "../errors.ts";
 import { DEFAULT_BASE_URL, entryToModel } from "../models.ts";
 import { probeKey } from "../provider.ts";
+import { formatCheckList, parseLiveArgs, usageText, type LiveCheck } from "./select.ts";
 
 // --- key + base url ----------------------------------------------------------
 
@@ -88,6 +94,70 @@ function loadKey(): string {
   return key;
 }
 
+// --- which checks to run (argv; the selector itself is pure, in ./select.ts) ---
+
+/**
+ * The catalog of sections below. `title` is the name each section reports under,
+ * so a filter can be a substring of it (`npm run live -- tools` → G). `costly`
+ * marks the checks whose requests the gateway answers with tokens.
+ */
+const CHECKS: LiveCheck[] = [
+  { id: "A", title: "the listing still carries the frozen catalog", costly: false },
+  { id: "B", title: "key validation without inference; 401 ≠ 403; and the empty-body trap", costly: false },
+  { id: "C", title: "the maxTokensField trap and the documented ranges, all from free rejections", costly: false },
+  { id: "D", title: "the outgoing body: max_tokens + chat_template_kwargs.enable_thinking", costly: false },
+  { id: "E", title: "thinking is on/off, not a scale", costly: true },
+  { id: "F", title: "reasoning_content is accepted on the assistant message", costly: true },
+  { id: "G", title: "a function tool returns a well-formed tool call", costly: true },
+  { id: "H", title: "usage on every chunk does not double-count through pi's adapter", costly: true },
+  // I classifies the error bodies B's free probes collected, so it declares the
+  // dependency and selecting I alone still runs B (both are free).
+  { id: "I", title: "every measured dialect is classified, and none becomes retryable or an overflow", costly: false, requires: ["B"] },
+  { id: "J", title: "surfaces: two more exist and are deliberately not registered", costly: true },
+];
+
+const SELECTION = parseLiveArgs(process.argv.slice(2), CHECKS);
+
+// All of this happens before `loadKey()`, so `--list` and a bad filter need
+// neither a key nor a network — the two things that make the harness awkward to
+// inspect.
+function reject(code: number, message: string): never {
+  console.error(message);
+  process.exit(code);
+}
+
+if (SELECTION.help) {
+  console.log(usageText());
+  process.exit(0);
+}
+if (SELECTION.badFlags.length > 0) {
+  reject(2, `unknown flag(s): ${SELECTION.badFlags.join(", ")}\n\n${usageText()}`);
+}
+if (SELECTION.unknown.length > 0) {
+  reject(
+    2,
+    `no check matches: ${SELECTION.unknown.join(", ")}\n` +
+      `valid ids: ${CHECKS.map((c) => c.id).join(", ")} (or any title substring)\n` +
+      `\n${formatCheckList(CHECKS, SELECTION.matched)}`,
+  );
+}
+if (SELECTION.list) {
+  console.log(formatCheckList(CHECKS, SELECTION.matched));
+  process.exit(0);
+}
+if (SELECTION.matched.length === 0) {
+  reject(2, "the selection matches no check; nothing would run. Try --list.");
+}
+if (SELECTION.matched.length !== CHECKS.length) {
+  console.log(
+    `selection: ${SELECTION.matched.join(", ")} — ${SELECTION.matched.length} of ${CHECKS.length} checks ` +
+      `(skipping ${CHECKS.filter((c) => !SELECTION.selected(c.id)).map((c) => c.id).join(", ")})` +
+      (SELECTION.pulledIn.length > 0
+        ? `\n           ${SELECTION.pulledIn.join(", ")} pulled in as a requirement of another selected check`
+        : ""),
+  );
+}
+
 const BASE_URL = (process.env.POOLSIDE_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
 const KEY = loadKey();
 const api = withBodyRecoveryApi(openAICompletionsApi());
@@ -95,6 +165,21 @@ const SKIP_COSTLY = process.env.POOLSIDE_LIVE_SKIP_COSTLY === "1";
 
 let failures = 0;
 let checks = 0;
+
+/**
+ * Section B's free probes, hoisted because section I classifies the *same*
+ * response bodies (that is the point of I: every dialect re-measured live and
+ * then run through pi's classifiers). B and I are separate blocks now, so the
+ * sharing has to be declared rather than fall out of module scope; the selector
+ * keeps it safe at runtime — `I` declares `requires: ["B"]`, so choosing I alone
+ * still runs B first. `!` is honest here: reading one of these without B having
+ * run is a selector bug, and it would throw a clear TypeError rather than
+ * mis-report.
+ */
+let emptyBad!: RawResult;
+let unknownGood!: RawResult;
+let unknownBad!: RawResult;
+let noAuth!: RawResult;
 
 interface LedgerRow {
   check: string;
@@ -297,411 +382,447 @@ async function streamLive(
 }
 
 // --- A. listing --------------------------------------------------------------
+sectionA: {
+  if (!SELECTION.selected("A")) break sectionA;
 
-const listing = await raw("A", "GET /v1/models", "/models");
-const listedIds = (listing.json?.data ?? []).map((m: any) => m.id);
-report(
-  "A. the listing still carries the frozen catalog",
-  listing.status === 200 && listedIds.length === CATALOG.length &&
-    CATALOG.every((entry) => listedIds.includes(entry.id)),
-  `HTTP ${listing.status}; ids ${JSON.stringify(listedIds)}\n` +
-    `catalog expects ${JSON.stringify(CATALOG.map((entry) => entry.id))}\n` +
-    CATALOG.map((entry) => {
-      const live = (listing.json?.data ?? []).find((m: any) => m.id === entry.id);
-      return `  ${entry.id}: context_length ${live?.context_length} (catalog ${entry.contextWindow}), ` +
-        `max_completion_tokens ${live?.max_completion_tokens} (catalog ${entry.maxTokens}), ` +
-        `supported_features ${JSON.stringify(live?.supported_features)}`;
-    }).join("\n"),
-);
+  const listing = await raw("A", "GET /v1/models", "/models");
+  const listedIds = (listing.json?.data ?? []).map((m: any) => m.id);
+  report(
+    "A. the listing still carries the frozen catalog",
+    listing.status === 200 && listedIds.length === CATALOG.length &&
+      CATALOG.every((entry) => listedIds.includes(entry.id)),
+    `HTTP ${listing.status}; ids ${JSON.stringify(listedIds)}\n` +
+      `catalog expects ${JSON.stringify(CATALOG.map((entry) => entry.id))}\n` +
+      CATALOG.map((entry) => {
+        const live = (listing.json?.data ?? []).find((m: any) => m.id === entry.id);
+        return `  ${entry.id}: context_length ${live?.context_length} (catalog ${entry.contextWindow}), ` +
+          `max_completion_tokens ${live?.max_completion_tokens} (catalog ${entry.maxTokens}), ` +
+          `supported_features ${JSON.stringify(live?.supported_features)}`;
+      }).join("\n"),
+  );
+}
 
 // --- B. the zero-inference key check -----------------------------------------
+sectionB: {
+  if (!SELECTION.selected("B")) break sectionB;
 
-const emptyGood = await raw("B", "POST {} (real key)", "/chat/completions", {
-  method: "POST",
-  body: "{}",
-});
-const emptyBad = await raw("B", "POST {} (bogus key)", "/chat/completions", {
-  method: "POST",
-  body: "{}",
-  auth: "bad",
-});
-const unknownGood = await raw("B", "POST unknown model (real key)", "/chat/completions", {
-  method: "POST",
-  body: JSON.stringify({ model: "poolside/does-not-exist-xyz", messages: [{ role: "user", content: "hi" }], max_tokens: 8 }),
-});
-const unknownBad = await raw("B", "POST unknown model (bogus key)", "/chat/completions", {
-  method: "POST",
-  body: JSON.stringify({ model: "poolside/does-not-exist-xyz", messages: [{ role: "user", content: "hi" }], max_tokens: 8 }),
-  auth: "bad",
-});
-const noAuth = await raw("B", "GET /v1/models (no Authorization header)", "/models", { auth: "none" });
-const probeResult = await probeKey(KEY, BASE_URL);
-const badProbeProbe = await probeKey("sky_bogus_key_000000000000000000000000", BASE_URL);
-report(
-  "B. key validation without inference; 401 ≠ 403; and the empty-body trap",
-  emptyGood.status === 400 && emptyBad.status === 400 &&
-    unknownGood.status === 404 && unknownBad.status === 403 &&
-    noAuth.status === 401 && probeResult === "valid" && badProbeProbe === "invalid",
-  `{} with the real key  -> HTTP ${emptyGood.status} ${emptyGood.text.trim().slice(0, 80)}\n` +
-    `{} with a bogus key  -> HTTP ${emptyBad.status} ${emptyBad.text.trim().slice(0, 80)}\n` +
-    "  ^ the SAME 400 for both: the body is validated before the key, so the generic " +
-    "\"empty body — 400 means the key authenticated\" recipe would accept a wrong key here.\n\n" +
-    `unknown model + real key  -> HTTP ${unknownGood.status} ${unknownGood.text.trim().slice(0, 80)}\n` +
-    `unknown model + bogus key -> HTTP ${unknownBad.status} ${unknownBad.text.trim().slice(0, 80)}\n` +
-    "  ^ the probe that does work: body parsed first, then the key, then the model id.\n\n" +
-    `no Authorization header at all -> HTTP ${noAuth.status} ${noAuth.text.trim().slice(0, 80)}\n` +
-    `probeKey(real key) -> ${probeResult}; probeKey(bogus key) -> ${badProbeProbe} ` +
-    "(both free: 404 and 403 are pre-inference rejections)",
-);
+  const emptyGood = await raw("B", "POST {} (real key)", "/chat/completions", {
+    method: "POST",
+    body: "{}",
+  });
+  emptyBad = await raw("B", "POST {} (bogus key)", "/chat/completions", {
+    method: "POST",
+    body: "{}",
+    auth: "bad",
+  });
+  unknownGood = await raw("B", "POST unknown model (real key)", "/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({ model: "poolside/does-not-exist-xyz", messages: [{ role: "user", content: "hi" }], max_tokens: 8 }),
+  });
+  unknownBad = await raw("B", "POST unknown model (bogus key)", "/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({ model: "poolside/does-not-exist-xyz", messages: [{ role: "user", content: "hi" }], max_tokens: 8 }),
+    auth: "bad",
+  });
+  noAuth = await raw("B", "GET /v1/models (no Authorization header)", "/models", { auth: "none" });
+  const probeResult = await probeKey(KEY, BASE_URL);
+  const badProbeProbe = await probeKey("sky_bogus_key_000000000000000000000000", BASE_URL);
+  report(
+    "B. key validation without inference; 401 ≠ 403; and the empty-body trap",
+    emptyGood.status === 400 && emptyBad.status === 400 &&
+      unknownGood.status === 404 && unknownBad.status === 403 &&
+      noAuth.status === 401 && probeResult === "valid" && badProbeProbe === "invalid",
+    `{} with the real key  -> HTTP ${emptyGood.status} ${emptyGood.text.trim().slice(0, 80)}\n` +
+      `{} with a bogus key  -> HTTP ${emptyBad.status} ${emptyBad.text.trim().slice(0, 80)}\n` +
+      "  ^ the SAME 400 for both: the body is validated before the key, so the generic " +
+      "\"empty body — 400 means the key authenticated\" recipe would accept a wrong key here.\n\n" +
+      `unknown model + real key  -> HTTP ${unknownGood.status} ${unknownGood.text.trim().slice(0, 80)}\n` +
+      `unknown model + bogus key -> HTTP ${unknownBad.status} ${unknownBad.text.trim().slice(0, 80)}\n` +
+      "  ^ the probe that does work: body parsed first, then the key, then the model id.\n\n" +
+      `no Authorization header at all -> HTTP ${noAuth.status} ${noAuth.text.trim().slice(0, 80)}\n` +
+      `probeKey(real key) -> ${probeResult}; probeKey(bogus key) -> ${badProbeProbe} ` +
+      "(both free: 404 and 403 are pre-inference rejections)",
+  );
+}
 
 // --- C. pre-inference rejections ---------------------------------------------
+sectionC: {
+  if (!SELECTION.selected("C")) break sectionC;
 
-const extraInputs = await raw("C", "POST (max_tokens + max_completion_tokens)", "/chat/completions", {
-  method: "POST",
-  body: JSON.stringify({
-    model: model.id,
-    messages: [{ role: "user", content: "hi" }],
-    max_tokens: 8,
-    max_completion_tokens: 8,
-  }),
-});
-const overCap = await raw("C", "POST (max_tokens 99999999)", "/chat/completions", {
-  method: "POST",
-  body: JSON.stringify({ model: model.id, messages: [{ role: "user", content: "hi" }], max_tokens: 99_999_999 }),
-});
-const hotTemperature = await raw("C", "POST (temperature 3)", "/chat/completions", {
-  method: "POST",
-  body: JSON.stringify({
-    model: model.id,
-    messages: [{ role: "user", content: "hi" }],
-    max_tokens: 8,
-    temperature: 3,
-  }),
-});
-report(
-  "C. the maxTokensField trap and the documented ranges, all from free rejections",
-  extraInputs.status === 400 && /Extra inputs are not permitted/.test(extraInputs.text) &&
-    overCap.status === 400 && /less than or equal to 262144/.test(overCap.text) &&
-    hotTemperature.status === 400,
-  `max_completion_tokens alongside max_tokens -> HTTP ${extraInputs.status}\n  ${extraInputs.text.slice(0, 200)}\n` +
-    `max_tokens 99999999 -> HTTP ${overCap.status}\n  ${overCap.text.slice(0, 200)}\n` +
-    `temperature 3 -> HTTP ${hotTemperature.status}\n  ${hotTemperature.text.slice(0, 160)}`,
-);
+  const extraInputs = await raw("C", "POST (max_tokens + max_completion_tokens)", "/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({
+      model: model.id,
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 8,
+      max_completion_tokens: 8,
+    }),
+  });
+  const overCap = await raw("C", "POST (max_tokens 99999999)", "/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({ model: model.id, messages: [{ role: "user", content: "hi" }], max_tokens: 99_999_999 }),
+  });
+  const hotTemperature = await raw("C", "POST (temperature 3)", "/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({
+      model: model.id,
+      messages: [{ role: "user", content: "hi" }],
+      max_tokens: 8,
+      temperature: 3,
+    }),
+  });
+  report(
+    "C. the maxTokensField trap and the documented ranges, all from free rejections",
+    extraInputs.status === 400 && /Extra inputs are not permitted/.test(extraInputs.text) &&
+      overCap.status === 400 && /less than or equal to 262144/.test(overCap.text) &&
+      hotTemperature.status === 400,
+    `max_completion_tokens alongside max_tokens -> HTTP ${extraInputs.status}\n  ${extraInputs.text.slice(0, 200)}\n` +
+      `max_tokens 99999999 -> HTTP ${overCap.status}\n  ${overCap.text.slice(0, 200)}\n` +
+      `temperature 3 -> HTTP ${hotTemperature.status}\n  ${hotTemperature.text.slice(0, 160)}`,
+  );
+}
 
 // --- D. the wire proof (free: captured before send) --------------------------
+sectionD: {
+  if (!SELECTION.selected("D")) break sectionD;
 
-const wireOff = await capturePayload("off");
-const wireOn = await capturePayload("low");
-const wireLevels: { level: string; enable: boolean }[] = [];
-for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
-  const captured = await capturePayload(level);
-  wireLevels.push({ level, enable: captured.body.chat_template_kwargs?.enable_thinking });
+  const wireOff = await capturePayload("off");
+  const wireOn = await capturePayload("low");
+  const wireLevels: { level: string; enable: boolean }[] = [];
+  for (const level of ["off", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+    const captured = await capturePayload(level);
+    wireLevels.push({ level, enable: captured.body.chat_template_kwargs?.enable_thinking });
+  }
+  const wireTools = await capturePayload("off", { tools: [weatherTool] });
+  report(
+    "D. the outgoing body: max_tokens + chat_template_kwargs.enable_thinking",
+    wireOff.body.max_tokens === model.maxTokens &&
+      !("max_completion_tokens" in wireOff.body) &&
+      !("reasoning_effort" in wireOff.body) &&
+      wireLevels.every((entry) => entry.enable === (entry.level !== "off")) &&
+      wireTools.body.tools?.length === 1,
+    `POST ${wireOff.url}\n` +
+      `max_tokens ${wireOff.body.max_tokens} (catalog ${model.maxTokens}); ` +
+      `max_completion_tokens present: ${"max_completion_tokens" in wireOff.body}; ` +
+      `reasoning_effort present: ${"reasoning_effort" in wireOff.body}\n` +
+      `enable_thinking per pi level: ${wireLevels.map((e) => `${e.level}=${e.enable}`).join(", ")}\n` +
+      `messages[0].role = ${wireOff.body.messages[0].role} (never "developer")\n` +
+      `tools on the wire: ${JSON.stringify(wireTools.body.tools?.[0]?.function?.name)}`,
+  );
 }
-const wireTools = await capturePayload("off", { tools: [weatherTool] });
-report(
-  "D. the outgoing body: max_tokens + chat_template_kwargs.enable_thinking",
-  wireOff.body.max_tokens === model.maxTokens &&
-    !("max_completion_tokens" in wireOff.body) &&
-    !("reasoning_effort" in wireOff.body) &&
-    wireLevels.every((entry) => entry.enable === (entry.level !== "off")) &&
-    wireTools.body.tools?.length === 1,
-  `POST ${wireOff.url}\n` +
-    `max_tokens ${wireOff.body.max_tokens} (catalog ${model.maxTokens}); ` +
-    `max_completion_tokens present: ${"max_completion_tokens" in wireOff.body}; ` +
-    `reasoning_effort present: ${"reasoning_effort" in wireOff.body}\n` +
-    `enable_thinking per pi level: ${wireLevels.map((e) => `${e.level}=${e.enable}`).join(", ")}\n` +
-    `messages[0].role = ${wireOff.body.messages[0].role} (never "developer")\n` +
-    `tools on the wire: ${JSON.stringify(wireTools.body.tools?.[0]?.function?.name)}`,
-);
 
 if (SKIP_COSTLY) {
   console.log(
     "\nPOOLSIDE_LIVE_SKIP_COSTLY=1: stopping after the free checks (A–D). " +
-      "E–J each cost a bounded number of tokens.\n",
+      "E–J each cost a bounded number of tokens. Same as `npm run live -- --free`; " +
+      "to run one costly check anyway, unset it and select by id.\n",
   );
 } else {
   // --- E. thinking is boolean -------------------------------------------------
-  const off = await streamLive(
-    "E",
-    "POST (enable_thinking false)",
-    {
-      model: model.id,
-      messages: [{ role: "user", content: "say ok" }],
-      max_tokens: 16,
-      chat_template_kwargs: { enable_thinking: false },
-    },
-  );
-  const on = await streamLive(
-    "E",
-    "POST (enable_thinking true)",
-    {
-      model: model.id,
-      messages: [{ role: "user", content: "say ok" }],
-      max_tokens: 16,
-      chat_template_kwargs: { enable_thinking: true },
-    },
-  );
-  report(
-    "E. thinking is on/off, not a scale",
-    off.usage!.reasoning === 0 && (off as any).reasoning_content === null &&
-      on.usage!.reasoning! > 0 && typeof (on as any).reasoning_content === "string",
-    `enable_thinking:false -> content ${JSON.stringify(off.content)}, ` +
-      `reasoning_content ${JSON.stringify((off as any).reasoning_content)}, reasoning_tokens ${off.usage!.reasoning}\n` +
-      `enable_thinking:true  -> content ${JSON.stringify(summarizeContent(on))}, ` +
-      `reasoning_content present: ${typeof (on as any).reasoning_content === "string"}, ` +
-      `reasoning_tokens ${on.usage!.reasoning}`,
-  );
+  sectionE: {
+    if (!SELECTION.selected("E")) break sectionE;
+
+    const off = await streamLive(
+      "E",
+      "POST (enable_thinking false)",
+      {
+        model: model.id,
+        messages: [{ role: "user", content: "say ok" }],
+        max_tokens: 16,
+        chat_template_kwargs: { enable_thinking: false },
+      },
+    );
+    const on = await streamLive(
+      "E",
+      "POST (enable_thinking true)",
+      {
+        model: model.id,
+        messages: [{ role: "user", content: "say ok" }],
+        max_tokens: 16,
+        chat_template_kwargs: { enable_thinking: true },
+      },
+    );
+    report(
+      "E. thinking is on/off, not a scale",
+      off.usage!.reasoning === 0 && (off as any).reasoning_content === null &&
+        on.usage!.reasoning! > 0 && typeof (on as any).reasoning_content === "string",
+      `enable_thinking:false -> content ${JSON.stringify(off.content)}, ` +
+        `reasoning_content ${JSON.stringify((off as any).reasoning_content)}, reasoning_tokens ${off.usage!.reasoning}\n` +
+        `enable_thinking:true  -> content ${JSON.stringify(summarizeContent(on))}, ` +
+        `reasoning_content present: ${typeof (on as any).reasoning_content === "string"}, ` +
+        `reasoning_tokens ${on.usage!.reasoning}`,
+    );
+  }
 
   // --- F. the paired reasoning-echo experiment --------------------------------
-  //
-  // The vendor documents an *effect*: "dropping previous reasoning content can
-  // prevent the model from reasoning in later steps". The 2026-09-26 pass ran the paired
-  // experiment and **could not reproduce it**: two rounds of the same pair gave
-  // opposite answers, so what is asserted here is the reproducible half — the
-  // echoed form is accepted and works — and the numbers are printed rather than
-  // summarised into a claim the evidence does not support.
-  const PAIRS = 3;
-  const echoedArm: number[] = [];
-  const silentArm: number[] = [];
-  const armsAccepted: boolean[] = [];
+  sectionF: {
+    if (!SELECTION.selected("F")) break sectionF;
 
-  for (let pair = 0; pair < PAIRS; pair++) {
-    const echoed = await streamLive("F", `pair ${pair + 1}: WITH reasoning_content`, {
-      model: model.id,
-      messages: [
-        { role: "user", content: "What is 2+2? Think it through." },
-        { role: "assistant", content: "4", reasoning_content: "The user asks 2+2. That is 4." },
-        { role: "user", content: "Now what is 3+3? Think it through." },
-      ],
-      max_tokens: 96,
-    });
-    const silent = await streamLive("F", `pair ${pair + 1}: WITHOUT reasoning_content`, {
-      model: model.id,
-      messages: [
-        { role: "user", content: "What is 2+2? Think it through." },
-        { role: "assistant", content: "4" },
-        { role: "user", content: "Now what is 3+3? Think it through." },
-      ],
-      max_tokens: 96,
-    });
-    echoedArm.push(echoed.usage!.reasoning ?? 0);
-    silentArm.push(silent.usage!.reasoning ?? 0);
-    armsAccepted.push(echoed.stopReason !== "error" && silent.stopReason !== "error");
+    //
+    // The vendor documents an *effect*: "dropping previous reasoning content can
+    // prevent the model from reasoning in later steps". The 2026-09-26 pass ran the paired
+    // experiment and **could not reproduce it**: two rounds of the same pair gave
+    // opposite answers, so what is asserted here is the reproducible half — the
+    // echoed form is accepted and works — and the numbers are printed rather than
+    // summarised into a claim the evidence does not support.
+    const PAIRS = 3;
+    const echoedArm: number[] = [];
+    const silentArm: number[] = [];
+    const armsAccepted: boolean[] = [];
+
+    for (let pair = 0; pair < PAIRS; pair++) {
+      const echoed = await streamLive("F", `pair ${pair + 1}: WITH reasoning_content`, {
+        model: model.id,
+        messages: [
+          { role: "user", content: "What is 2+2? Think it through." },
+          { role: "assistant", content: "4", reasoning_content: "The user asks 2+2. That is 4." },
+          { role: "user", content: "Now what is 3+3? Think it through." },
+        ],
+        max_tokens: 96,
+      });
+      const silent = await streamLive("F", `pair ${pair + 1}: WITHOUT reasoning_content`, {
+        model: model.id,
+        messages: [
+          { role: "user", content: "What is 2+2? Think it through." },
+          { role: "assistant", content: "4" },
+          { role: "user", content: "Now what is 3+3? Think it through." },
+        ],
+        max_tokens: 96,
+      });
+      echoedArm.push(echoed.usage!.reasoning ?? 0);
+      silentArm.push(silent.usage!.reasoning ?? 0);
+      armsAccepted.push(echoed.stopReason !== "error" && silent.stopReason !== "error");
+    }
+
+    // The *documented* failure direction is "no echo ⇒ no reasoning", i.e. a silent
+    // arm with zero reasoning tokens while the echoed arm has some.
+    const reproduced = echoedArm.filter((tokens, index) => tokens > 0 && silentArm[index] === 0).length;
+    report(
+      "F. reasoning_content is accepted on the assistant message (the *effect* did not reproduce)",
+      // The reproducible claim is acceptance, nothing more: the responded-with-reasoning
+      // arm is what pi sends, and it must not be rejected or empty. A stronger
+      // assertion (e.g. "the echoed arm always reasons") fails on this provider's
+      // own variance, which is precisely the finding.
+      armsAccepted.every(Boolean),
+      `reasoning tokens on the second turn, per pair (with echo -> without echo):\n` +
+        echoedArm.map((tokens, index) => `  pair ${index + 1}: ${tokens} -> ${silentArm[index]}`).join("\n") +
+        `\n\nNote the plateau: the WITHOUT arm sat exactly at the 96-token cap in all three pairs, ` +
+        `so its token count measures the cap, not the model's willingness to reason.\n\n` +
+        `The vendor's documented failure ("dropping previous reasoning content can prevent the ` +
+        `model from reasoning in later steps", docs.poolside.ai § Preserve reasoning in agentic ` +
+        `workflows) reproduced in ${reproduced}/${PAIRS} pairs — so it is NOT confirmed by this ` +
+        `build. The first pair measured during development looked like a textbook confirmation ` +
+        `(62 -> 0 reasoning tokens) and the very next pair inverted it (25 -> 96).\n\n` +
+        `What *is* measured and reproducible: the echoed request is accepted (200) and the model ` +
+        `keeps reasoning on the second turn, so sending the field back costs nothing and is what ` +
+        `the provider asks for. The plugin sets requiresReasoningContentOnAssistantMessages on ` +
+        `that basis, with the wire shape proved offline in test/wire-format.test.ts.\n` +
+        `To settle the effect properly: 10+ pairs, one variable, and a fixed prompt; the free key ` +
+        `makes that affordable.`,
+    );
   }
-
-  // The *documented* failure direction is "no echo ⇒ no reasoning", i.e. a silent
-  // arm with zero reasoning tokens while the echoed arm has some.
-  const reproduced = echoedArm.filter((tokens, index) => tokens > 0 && silentArm[index] === 0).length;
-  report(
-    "F. reasoning_content is accepted on the assistant message (the *effect* did not reproduce)",
-    // The reproducible claim is acceptance, nothing more: the responded-with-reasoning
-    // arm is what pi sends, and it must not be rejected or empty. A stronger
-    // assertion (e.g. "the echoed arm always reasons") fails on this provider's
-    // own variance, which is precisely the finding.
-    armsAccepted.every(Boolean),
-    `reasoning tokens on the second turn, per pair (with echo -> without echo):\n` +
-      echoedArm.map((tokens, index) => `  pair ${index + 1}: ${tokens} -> ${silentArm[index]}`).join("\n") +
-      `\n\nNote the plateau: the WITHOUT arm sat exactly at the 96-token cap in all three pairs, ` +
-      `so its token count measures the cap, not the model's willingness to reason.\n\n` +
-      `The vendor's documented failure ("dropping previous reasoning content can prevent the ` +
-      `model from reasoning in later steps", docs.poolside.ai § Preserve reasoning in agentic ` +
-      `workflows) reproduced in ${reproduced}/${PAIRS} pairs — so it is NOT confirmed by this ` +
-      `build. The first pair measured during development looked like a textbook confirmation ` +
-      `(62 -> 0 reasoning tokens) and the very next pair inverted it (25 -> 96).\n\n` +
-      `What *is* measured and reproducible: the echoed request is accepted (200) and the model ` +
-      `keeps reasoning on the second turn, so sending the field back costs nothing and is what ` +
-      `the provider asks for. The plugin sets requiresReasoningContentOnAssistantMessages on ` +
-      `that basis, with the wire shape proved offline in test/wire-format.test.ts.\n` +
-      `To settle the effect properly: 10+ pairs, one variable, and a fixed prompt; the free key ` +
-      `makes that affordable.`,
-  );
 
   // --- G. tools --------------------------------------------------------------
-  const toolCall = await streamLive("G", "tool round-trip", {
-    model: model.id,
-    messages: [{ role: "user", content: "What is the weather in Paris? Use the get_weather tool." }],
-    max_tokens: 256,
-    chat_template_kwargs: { enable_thinking: false },
-    tools: [
-      {
-        type: "function",
-        function: {
-          name: "get_weather",
-          description: "Look up the weather for a city.",
-          parameters: {
-            type: "object",
-            properties: { city: { type: "string", description: "City name" } },
-            required: ["city"],
+  sectionG: {
+    if (!SELECTION.selected("G")) break sectionG;
+
+    const toolCall = await streamLive("G", "tool round-trip", {
+      model: model.id,
+      messages: [{ role: "user", content: "What is the weather in Paris? Use the get_weather tool." }],
+      max_tokens: 256,
+      chat_template_kwargs: { enable_thinking: false },
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "get_weather",
+            description: "Look up the weather for a city.",
+            parameters: {
+              type: "object",
+              properties: { city: { type: "string", description: "City name" } },
+              required: ["city"],
+            },
           },
         },
-      },
-    ],
-  });
-  const calls = (toolCall as any).tool_calls ?? [];
-  report(
-    "G. a function tool returns a well-formed tool call",
-    calls.length === 1 && calls[0].function?.name === "get_weather" &&
-      JSON.parse(calls[0].function.arguments).city === "Paris",
-    `finish_reason ${toolCall.stopReason}; tool_calls ${JSON.stringify(calls)}`,
-  );
+      ],
+    });
+    const calls = (toolCall as any).tool_calls ?? [];
+    report(
+      "G. a function tool returns a well-formed tool call",
+      calls.length === 1 && calls[0].function?.name === "get_weather" &&
+        JSON.parse(calls[0].function.arguments).city === "Paris",
+      `finish_reason ${toolCall.stopReason}; tool_calls ${JSON.stringify(calls)}`,
+    );
+  }
 
   // --- H. streaming usage through the real adapter ----------------------------
-  await pace();
-  const streamResponse = await fetch(`${BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      model: model.id,
-      messages: [{ role: "user", content: "say ok" }],
-      max_tokens: 16,
-      stream: true,
-      stream_options: { include_usage: true },
-      chat_template_kwargs: { enable_thinking: false },
-    }),
-    signal: AbortSignal.timeout(180_000),
-  });
-  const sse = await streamResponse.text();
-  const chunks = sse.split("\n").filter((line) => line.startsWith("data: ") && line !== "data: [DONE]");
-  const parsed = chunks.map((line) => JSON.parse(line.slice("data: ".length)));
-  const withUsage = parsed.filter((chunk) => chunk.usage);
-  const lastCumulative = withUsage.at(-1)?.usage;
-  const usageEveryChunk = withUsage.length === parsed.length - 1; // all but the closing delta
+  sectionH: {
+    if (!SELECTION.selected("H")) break sectionH;
 
-  let streamed: AssistantMessage | undefined;
-  const replayApi = openAICompletionsApi();
-  const replayStream = replayApi.streamSimple(model, liveContext(), {
-    apiKey: KEY,
-    maxRetries: 0,
-    fetch: (async () => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch,
-  });
-  for await (const event of replayStream) {
-    const candidate = (event as any).error ?? (event as any).message ?? (event as any).partial;
-    streamed = candidate ?? streamed;
+    await pace();
+    const streamResponse = await fetch(`${BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: model.id,
+        messages: [{ role: "user", content: "say ok" }],
+        max_tokens: 16,
+        stream: true,
+        stream_options: { include_usage: true },
+        chat_template_kwargs: { enable_thinking: false },
+      }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    const sse = await streamResponse.text();
+    const chunks = sse.split("\n").filter((line) => line.startsWith("data: ") && line !== "data: [DONE]");
+    const parsed = chunks.map((line) => JSON.parse(line.slice("data: ".length)));
+    const withUsage = parsed.filter((chunk) => chunk.usage);
+    const lastCumulative = withUsage.at(-1)?.usage;
+    const usageEveryChunk = withUsage.length === parsed.length - 1; // all but the closing delta
+
+    let streamed: AssistantMessage | undefined;
+    const replayApi = openAICompletionsApi();
+    const replayStream = replayApi.streamSimple(model, liveContext(), {
+      apiKey: KEY,
+      maxRetries: 0,
+      fetch: (async () => new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch,
+    });
+    for await (const event of replayStream) {
+      const candidate = (event as any).error ?? (event as any).message ?? (event as any).partial;
+      streamed = candidate ?? streamed;
+    }
+    ledger.push({
+      check: "H",
+      request: "stream (recorded live)",
+      status: streamResponse.status,
+      billed: streamResponse.ok,
+      inputTokens: lastCumulative?.prompt_tokens ?? 0,
+      outputTokens: lastCumulative?.completion_tokens ?? 0,
+      reasoningTokens: lastCumulative?.completion_tokens_details?.reasoning_tokens ?? 0,
+      cachedTokens: lastCumulative?.prompt_tokens_details?.cached_tokens ?? 0,
+    });
+    const streamedUsage = streamed?.usage;
+    report(
+      "H. usage on every chunk does not double-count through pi's adapter",
+      usageEveryChunk && streamedUsage?.output === lastCumulative?.completion_tokens &&
+        streamedUsage?.totalTokens === lastCumulative?.total_tokens,
+      `${parsed.length} chunks, ${withUsage.length} carrying usage (every content chunk)\n` +
+        `closing delta carries usage: ${"usage" in parsed.at(-1)}\n` +
+        `last cumulative: completion ${lastCumulative?.completion_tokens}, total ${lastCumulative?.total_tokens}\n` +
+        `pi's adapter reported: output ${streamedUsage?.output}, total ${streamedUsage?.totalTokens} ` +
+        `(a sum over chunks would be larger)`,
+    );
   }
-  ledger.push({
-    check: "H",
-    request: "stream (recorded live)",
-    status: streamResponse.status,
-    billed: streamResponse.ok,
-    inputTokens: lastCumulative?.prompt_tokens ?? 0,
-    outputTokens: lastCumulative?.completion_tokens ?? 0,
-    reasoningTokens: lastCumulative?.completion_tokens_details?.reasoning_tokens ?? 0,
-    cachedTokens: lastCumulative?.prompt_tokens_details?.cached_tokens ?? 0,
-  });
-  const streamedUsage = streamed?.usage;
-  report(
-    "H. usage on every chunk does not double-count through pi's adapter",
-    usageEveryChunk && streamedUsage?.output === lastCumulative?.completion_tokens &&
-      streamedUsage?.totalTokens === lastCumulative?.total_tokens,
-    `${parsed.length} chunks, ${withUsage.length} carrying usage (every content chunk)\n` +
-      `closing delta carries usage: ${"usage" in parsed.at(-1)}\n` +
-      `last cumulative: completion ${lastCumulative?.completion_tokens}, total ${lastCumulative?.total_tokens}\n` +
-      `pi's adapter reported: output ${streamedUsage?.output}, total ${streamedUsage?.totalTokens} ` +
-      `(a sum over chunks would be larger)`,
-  );
 
   // --- J. the other two surfaces ---------------------------------------------
-  const messages = await raw("J", "POST /v1/messages", "/messages", {
-    method: "POST",
-    body: JSON.stringify({
-      model: model.id,
-      messages: [{ role: "user", content: "say ok" }],
-      max_tokens: 1,
-    }),
-  });
-  const responses = await raw("J", "POST /v1/responses", "/responses", {
-    method: "POST",
-    body: JSON.stringify({ model: model.id, input: "say ok", max_output_tokens: 1 }),
-  });
-  const embeddings = await raw("J", "POST /v1/embeddings", "/embeddings", {
-    method: "POST",
-    body: JSON.stringify({ model: model.id, input: "hi" }),
-  });
-  report(
-    "J. surfaces: two more exist and are deliberately not registered; none is an embedding route",
-    messages.status === 200 && responses.status === 200 && embeddings.status === 404,
-    `/v1/messages (Anthropic shape) -> HTTP ${messages.status} ` +
-      `content-type ${messages.contentType}\n` +
-      `/v1/responses -> HTTP ${responses.status} content-type ${responses.contentType}\n` +
-      `/v1/embeddings -> HTTP ${embeddings.status} ${embeddings.text.slice(0, 80)}\n` +
-      "All three are state 2 of the README's three-state table: they exist, and only " +
-      "chat-completions is registered.",
-  );
+  sectionJ: {
+    if (!SELECTION.selected("J")) break sectionJ;
+
+    const messages = await raw("J", "POST /v1/messages", "/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        model: model.id,
+        messages: [{ role: "user", content: "say ok" }],
+        max_tokens: 1,
+      }),
+    });
+    const responses = await raw("J", "POST /v1/responses", "/responses", {
+      method: "POST",
+      body: JSON.stringify({ model: model.id, input: "say ok", max_output_tokens: 1 }),
+    });
+    const embeddings = await raw("J", "POST /v1/embeddings", "/embeddings", {
+      method: "POST",
+      body: JSON.stringify({ model: model.id, input: "hi" }),
+    });
+    report(
+      "J. surfaces: two more exist and are deliberately not registered; none is an embedding route",
+      messages.status === 200 && responses.status === 200 && embeddings.status === 404,
+      `/v1/messages (Anthropic shape) -> HTTP ${messages.status} ` +
+        `content-type ${messages.contentType}\n` +
+        `/v1/responses -> HTTP ${responses.status} content-type ${responses.contentType}\n` +
+        `/v1/embeddings -> HTTP ${embeddings.status} ${embeddings.text.slice(0, 80)}\n` +
+        "All three are state 2 of the README's three-state table: they exist, and only " +
+        "chat-completions is registered.",
+    );
+  }
 }
 
 // --- I. the error layer against live traffic ---------------------------------
+sectionI: {
+  if (!SELECTION.selected("I")) break sectionI;
 
-const errorCases: { name: string; result: RawResult; expectStatus: number }[] = [
-  { name: "no Authorization header", result: noAuth, expectStatus: 401 },
-  { name: "wrong key", result: unknownBad, expectStatus: 403 },
-  { name: "unknown model (good key)", result: unknownGood, expectStatus: 404 },
-  {
-    name: "unknown model (bogus key)",
-    result: unknownBad,
-    expectStatus: 403,
-  },
-  {
-    name: "empty body, which is what a bogus key also gets",
-    result: emptyBad,
-    expectStatus: 400,
-  },
-];
-
-/**
- * pi's classifiers read an `AssistantMessage`, so the live check builds the same
- * shape `pi-ai/utils/overflow.js` and `utils/retry.js` consume.
- */
-function failedTurn(errorMessage: string): AssistantMessage {
-  return {
-    role: "assistant",
-    provider: "poolside",
-    api: "openai-completions",
-    model: model.id,
-    stopReason: "error",
-    errorMessage,
-    content: [],
-    usage: {
-      input: 1,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 1,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  const errorCases: { name: string; result: RawResult; expectStatus: number }[] = [
+    { name: "no Authorization header", result: noAuth, expectStatus: 401 },
+    { name: "wrong key", result: unknownBad, expectStatus: 403 },
+    { name: "unknown model (good key)", result: unknownGood, expectStatus: 404 },
+    {
+      name: "unknown model (bogus key)",
+      result: unknownBad,
+      expectStatus: 403,
     },
-    timestamp: 1,
-  } as AssistantMessage;
-}
+    {
+      name: "empty body, which is what a bogus key also gets",
+      result: emptyBad,
+      expectStatus: 400,
+    },
+  ];
 
-const classification = errorCases.map((entry) => {
-  const composed = `${entry.result.status} ${entry.result.text}`;
-  const clarified = clarifyPoolsideError(composed);
-  const parsed = parseGatewayError(composed);
-  const retryableBefore = isRetryableAssistantError(failedTurn(composed));
-  const retryableAfter = clarified
-    ? isRetryableAssistantError(failedTurn(clarified))
-    : retryableBefore;
-  return {
-    name: entry.name,
-    status: entry.result.status,
-    ok: entry.result.status === entry.expectStatus,
-    parsed: parsed.message,
-    clarified,
-    overflow: isContextOverflow(failedTurn(clarified ?? composed)),
-    retryStable: retryableBefore === retryableAfter,
-  };
-});
-report(
-  "I. every measured dialect is classified, and none becomes retryable or an overflow",
-  classification.every((entry) => entry.ok && entry.clarified && !entry.overflow && entry.retryStable),
-  classification
-    .map(
-      (entry) =>
-        `${entry.name}: HTTP ${entry.status}\n  parsed as: ${JSON.stringify(entry.parsed.slice(0, 90))}\n` +
-        `  clarified: ${entry.clarified ? "yes" : "NO"}; overflow after rewrite: ${entry.overflow}; ` +
-        `retryability unchanged: ${entry.retryStable}`,
-    )
-    .join("\n"),
-);
+  /**
+   * pi's classifiers read an `AssistantMessage`, so the live check builds the same
+   * shape `pi-ai/utils/overflow.js` and `utils/retry.js` consume.
+   */
+  function failedTurn(errorMessage: string): AssistantMessage {
+    return {
+      role: "assistant",
+      provider: "poolside",
+      api: "openai-completions",
+      model: model.id,
+      stopReason: "error",
+      errorMessage,
+      content: [],
+      usage: {
+        input: 1,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 1,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      timestamp: 1,
+    } as AssistantMessage;
+  }
+
+  const classification = errorCases.map((entry) => {
+    const composed = `${entry.result.status} ${entry.result.text}`;
+    const clarified = clarifyPoolsideError(composed);
+    const parsed = parseGatewayError(composed);
+    const retryableBefore = isRetryableAssistantError(failedTurn(composed));
+    const retryableAfter = clarified
+      ? isRetryableAssistantError(failedTurn(clarified))
+      : retryableBefore;
+    return {
+      name: entry.name,
+      status: entry.result.status,
+      ok: entry.result.status === entry.expectStatus,
+      parsed: parsed.message,
+      clarified,
+      overflow: isContextOverflow(failedTurn(clarified ?? composed)),
+      retryStable: retryableBefore === retryableAfter,
+    };
+  });
+  report(
+    "I. every measured dialect is classified, and none becomes retryable or an overflow",
+    classification.every((entry) => entry.ok && entry.clarified && !entry.overflow && entry.retryStable),
+    classification
+      .map(
+        (entry) =>
+          `${entry.name}: HTTP ${entry.status}\n  parsed as: ${JSON.stringify(entry.parsed.slice(0, 90))}\n` +
+          `  clarified: ${entry.clarified ? "yes" : "NO"}; overflow after rewrite: ${entry.overflow}; ` +
+          `retryability unchanged: ${entry.retryStable}`,
+      )
+      .join("\n"),
+  );
+}
 
 // --- ledger ------------------------------------------------------------------
 
@@ -740,7 +861,13 @@ console.log(
     "if that changes.",
 );
 
-console.log(`\n${checks - failures}/${checks} checks passed.`);
+console.log(
+  `\n${checks - failures}/${checks} checks passed.` +
+    (SELECTION.matched.length === CHECKS.length
+      ? ""
+      : ` (${SELECTION.matched.length} of ${CHECKS.length} selected: ${SELECTION.matched.join(", ")};` +
+        ` skipped ${CHECKS.filter((c) => !SELECTION.selected(c.id)).map((c) => c.id).join(", ")})`),
+);
 if (failures > 0) {
   console.log(`${failures} FAILED.`);
   process.exitCode = 1;
