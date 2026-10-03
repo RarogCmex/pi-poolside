@@ -231,6 +231,11 @@ npm run live -- tools usage   # title substrings → G and H
 npm run live -- --free        # A–D and I: nothing the gateway answers with tokens
 ```
 
+Re-run against **pi 1.0.0 / pi-ai 1.0.0** on **2026-10-03**: `npm run live` →
+**10/10 checks passed**, 22 requests (13 answered 2xx, 9 rejected before
+inference), **$0.00** — the listing's own `pricing` object is zero on every field
+and `is_free` is true for both ids.
+
 A filter is a check id, or a title substring of three or more characters (so `a`
 means check A, not every title containing the letter); a filter that matches
 nothing exits 2 rather than quietly running nothing, because "0 of 10 checks" must
