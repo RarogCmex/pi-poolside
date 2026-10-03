@@ -388,8 +388,11 @@ links them from your global pi install; it probes the npm prefix, nvm, pnpm,
 creates junctions on Windows. For a specific install:
 `PI_ROOT=/path/to/node_modules node scripts/link-pi.mjs`. Verified against
 pi-ai 0.87.1, whose internals the compat flags are pinned against; the suite was
-re-run green on pi-ai 0.99.1 (2026-09-30, 160/160). The flags stay pinned on
-purpose, so a pi-side change cannot start sending different wire fields here.
+re-run green on pi-ai 0.99.1 (2026-09-30, 160/160) and on pi/pi-ai 1.0.0
+(2026-10-03, 178/178 — the suite grew since; the pinned flags still hold). Loading
+was checked separately on 1.0.0: `pi -ne -e <repo> --offline --list-models poolside`
+prints the same 2 models. The flags stay pinned on purpose, so a pi-side change
+cannot start sending different wire fields here.
 
 `npm run typecheck` shells out to a bare `tsc`, and this repo deliberately carries
 no devDependencies (`scripts/link-pi.mjs` links only pi's packages), so TypeScript

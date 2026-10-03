@@ -8,10 +8,11 @@
  * `reasoning_content` preserved on assistant messages, a live listing overlay,
  * and an error layer for the gateway's three measured failure dialects.
  *
- * pi 0.87 boundaries: `message_end` rewrites the *finalized* assistant message
- * before it is persisted — so the transcript, the next turn and the display all
- * agree — while `turn_end` appends one persistent TUI note for the failures a
- * human must act on.
+ * pi 0.87 boundaries, last probed live on 0.99.2 (A–J all PASS, 2026-10-01): `message_end` rewrites
+ * the *finalized* assistant message before it is persisted — so the transcript,
+ * the next turn and the display all agree — while `turn_end` appends one
+ * persistent TUI note for the failures a human must act on. On pi 1.0.0
+ * (2026-10-03) the offline suite and the provider load are green.
  */
 
 // NOTE on this import: pi's extension loader aliases the bare
